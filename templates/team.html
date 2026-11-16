@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}<div class="eyebrow">{{ member.agency.name }}</div>
+<h1>Команда агентства</h1>
+<p class="lead">Приглашайте сотрудников и управляйте доступом. История остаётся в агентстве.</p>
+<section class="panel">
+  <h2>Пригласить риелтора</h2>
+  <form method="post">{% csrf_token %}<input type="hidden"
+                                             name="action"
+                                             value="invite">{% include "fields.html" %}<button>Создать приглашение</button>
+  </form>
+  {% if invite_link %}
+    <div class="notice success">
+      <label for="invite-link">Передайте эту ссылку сотруднику лично</label>
+      <input id="invite-link" readonly value="{{ invite_link }}">
+    </div>
+  {% endif %}
+</section>
+<section class="panel">
+  <h2>Участники</h2>{% for m in members %}<div class="version-row">
+    <div>
+      <strong>{{ m.user.get_full_name|default:m.user.username }}</strong>
+      <small>{{ m.get_role_display }} · {% if m.active %}Доступ активен{% else %}Доступ отключён{% endif %}</small>
+    </div>{% if m.role != "manager" %}<form method="post">{% csrf_token %}<input type="hidden" name="member_id" value="{{ m.pk }}">{% if m.active %}<button name="action"
+                                                                                                                                                            value="deactivate"
+                                                                                                                                                            class="danger"
+                                                                                                                                                            data-confirm="Доступ сотрудника прекратится. Его история сохранится.">Отключить доступ</button>{% else %}<button name="action" value="reactivate" class="secondary">Восстановить доступ</button>{% endif %}</form>{% endif %}</div>{% endfor %}</section>
+  <section class="panel">
+    <h2>Приглашения</h2>{% for i in invitations %}<p>{{ i.email }} · {% if i.accepted_at %}Активировано{% elif i.valid %}Действует до {{ i.expires_at|date:'d.m.Y' }}{% else %}Истекло — создайте новое{% endif %}</p>{% empty %}<p class="muted">Приглашений пока нет.</p>{% endfor %}</section>{% endblock %}

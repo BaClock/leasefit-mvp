@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="public-heading">
+    <a class="brand" href="/login">Lease<span>FIT</span>
+    </a>
+    <a href="{% url 'login' %}">Войти в кабинет →</a>
+  </div>
+  <div class="eyebrow">ПИЛОТ ДЛЯ АГЕНТСТВ</div>
+  <h1>
+    Проверьте LeaseFIT
+    <br>
+    на своих подборах
+  </h1>
+  <p class="lead">От запроса клиента до понятного отчёта. Начните без CRM.</p>
+  <section class="panel narrow">
+    <h2>Заявка на участие</h2>
+    <form method="post">
+      {% csrf_token %}
+      {% include "fields.html" %}<p class="hint">Укажите рабочий контакт. Клиентские документы не требуются. <a href="{% url 'privacy' %}">Условия обработки заявки</a>.</p>
+      <button>Подать заявку на пилот →</button>
+    </form>
+    <p class="muted">Учебная среда. Вводите только вымышленные контакты. Условия обработки должны быть утверждены оператором до реального пилота.</p>
+  </section>
+{% endblock %}

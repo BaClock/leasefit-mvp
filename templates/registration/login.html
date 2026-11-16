@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="auth-panel panel">
+    <a class="brand" href="/login">Lease<span>FIT</span>
+    </a>
+    <div class="eyebrow">РАБОЧИЙ КАБИНЕТ</div>
+    <h1>Войти в кабинет</h1>
+    <p>Проверяйте помещения под конкретный бизнес.</p>
+    <form method="post">{% csrf_token %}<input type="hidden"
+                                               name="next"
+                                               value="{{ next }}">{% include "fields.html" %}<button>Войти →</button>
+    </form>
+    <p>
+      <a href="{% url 'password_reset' %}">Восстановить доступ</a>
+    </p>
+    <div class="divider"></div>
+    <p>Первый вход — по приглашению руководителя.</p>
+    <a href="{% url 'pilot' %}">Подать заявку на пилот ↗</a>
+  </div>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="empty">
+    <h1>Страница недоступна</h1>
+    <p>Проверьте адрес или вернитесь к разрешённым запросам.</p>
+    <a href="{% url 'requests' %}">К моим запросам</a>
+  </div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="auth-panel panel">
+    <div class="eyebrow">LEASEFIT · ПРИГЛАШЕНИЕ</div>
+    <h1>Добро пожаловать</h1>
+    <p>{{ invitation.agency.name }} приглашает вас как {{ invitation.get_role_display|lower }}.</p>
+    <p>{{ invitation.email }}</p>
+    <form method="post">
+      {% csrf_token %}
+      {% include "fields.html" %}<button>Активировать и войти →</button>
+    </form>
+  </div>
+{% endblock %}

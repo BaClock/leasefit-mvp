@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="auth-panel panel">
+    <div class="pill pass">✓ Заявка принята</div>
+    <h1>Спасибо за заявку</h1>
+    <p>Данные сохранены. Участие и приглашение в кабинет подтверждаются отдельно.</p>
+    <a href="{% url 'login' %}">Войти в кабинет →</a>
+  </div>
+{% endblock %}

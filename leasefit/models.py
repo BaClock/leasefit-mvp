@@ -1,0 +1,350 @@
+import uuid
+from django.conf import settings
+from django.db import models
+from django.core.validators import MinValueValidator
+from django.utils import timezone
+
+
+class Agency(models.Model):
+    name = models.CharField("Агентство", max_length=160)
+
+    def __str__(self):
+        return self.name
+
+
+class Membership(models.Model):
+    ROLES = [("realtor", "Риелтор"), ("manager", "Руководитель")]
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="membership"
+    )
+    agency = models.ForeignKey(Agency, on_delete=models.PROTECT)
+    role = models.CharField(max_length=12, choices=ROLES, default="realtor")
+    active = models.BooleanField(default=True)
+
+
+class Invitation(models.Model):
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    agency = models.ForeignKey(Agency, on_delete=models.CASCADE)
+    email = models.EmailField()
+    role = models.CharField(max_length=12, choices=Membership.ROLES, default="realtor")
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+
+    @property
+    def valid(self):
+        return not self.accepted_at and self.expires_at > timezone.now()
+
+
+money = dict(
+    max_digits=14,
+    decimal_places=2,
+    null=True,
+    blank=True,
+    validators=[MinValueValidator(0)],
+)
+
+
+class ClientRequest(models.Model):
+    STAGES = [("draft", "Черновик"), ("active", "В работе"), ("done", "Завершён")]
+    agency = models.ForeignKey(Agency, on_delete=models.PROTECT)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    title = models.CharField("Название запроса", max_length=180)
+    city = models.CharField("Город", max_length=120, default="Новосибирск")
+    business = models.CharField("Формат бизнеса", max_length=160, default="Кофейня")
+    geography = models.CharField("Районы / ориентиры", max_length=250, blank=True)
+    budget = models.DecimalField("Лимит в месяц, ₽", **money)
+    start_budget = models.DecimalField("Бюджет на старт, ₽", **money)
+    stage = models.CharField(max_length=10, choices=STAGES, default="draft")
+    archived = models.BooleanField(default=False)
+    version = models.PositiveIntegerField(default=1)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def ready(self):
+        return self.requirements.filter(priority="required").exists()
+
+    def __str__(self):
+        return self.title
+
+
+class Requirement(models.Model):
+    PRIORITIES = [
+        ("required", "Обязательное"),
+        ("desired", "Желательное"),
+        ("na", "Не применимо"),
+    ]
+    OPERATORS = [("gte", "≥"), ("lte", "≤"), ("range", "Диапазон"), ("eq", "Да / нет")]
+    request = models.ForeignKey(
+        ClientRequest, on_delete=models.CASCADE, related_name="requirements"
+    )
+    name = models.CharField("Параметр (одинаковое имя в карточке)", max_length=100)
+    unit = models.CharField("Единица", max_length=25, blank=True)
+    operator = models.CharField(
+        "Оператор", max_length=8, choices=OPERATORS, default="gte"
+    )
+    minimum = models.DecimalField("Порог / от", **money)
+    maximum = models.DecimalField("До", **money)
+    expected = models.BooleanField("Требуется «да»", default=True)
+    priority = models.CharField(
+        "Важность", max_length=10, choices=PRIORITIES, default="required"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["request", "name"], name="one_requirement_per_field"
+            )
+        ]
+
+    def __str__(self):
+        val = (
+            ("да" if self.expected else "нет")
+            if self.operator == "eq"
+            else (
+                f"{self.minimum}–{self.maximum}"
+                if self.operator == "range"
+                else str(self.minimum)
+            )
+        )
+        return (
+            f"{self.name}: {val}"
+            if self.operator == "eq"
+            else f"{self.name}: {self.get_operator_display()} {val} {self.unit}"
+        )
+
+
+class Premises(models.Model):
+    request = models.ForeignKey(
+        ClientRequest, on_delete=models.CASCADE, related_name="premises"
+    )
+    label = models.CharField("Адрес или рабочая метка", max_length=250)
+    floor = models.CharField("Этаж", max_length=40, blank=True)
+    number = models.CharField("Номер помещения", max_length=60, blank=True)
+    listing_url = models.URLField(
+        "Ссылка на объявление (источник)", blank=True, max_length=1500
+    )
+    commercial_source_type = models.CharField(
+        "Источник коммерческих условий",
+        max_length=12,
+        choices=[
+            ("listing", "Объявление"),
+            ("owner", "Ответ собственника"),
+            ("document", "Документ"),
+            ("manual", "Ручной ввод"),
+        ],
+        default="manual",
+    )
+    commercial_source = models.CharField(
+        "Источник всех введённых сумм и расчётной площади, страница / раздел",
+        max_length=500,
+        blank=True,
+    )
+    commercial_date = models.DateField(
+        "Дата коммерческих условий", null=True, blank=True
+    )
+    commercial_status = models.CharField(
+        "Подтверждение коммерческих условий",
+        max_length=12,
+        choices=[
+            ("unverified", "Не подтверждено"),
+            ("confirmed", "Подтверждено"),
+            ("conflict", "Конфликт"),
+        ],
+        default="unverified",
+    )
+    commercial_confirmation = models.CharField(
+        "Основание подтверждения коммерческих условий", max_length=700, blank=True
+    )
+    area = models.DecimalField("Площадь, м² (для расчёта аренды)", **money)
+    rent = models.DecimalField("Базовая аренда, ₽/мес.", **money)
+    rate = models.DecimalField("Ставка, ₽/м² в месяц", **money)
+    operating = models.DecimalField("Эксплуатация, ₽/мес.", **money)
+    utilities = models.DecimalField("Коммунальные, ₽/мес.", **money)
+    other_monthly = models.DecimalField("Прочие регулярные, ₽/мес.", **money)
+    vat_mode = models.CharField(
+        "НДС",
+        max_length=12,
+        choices=[
+            ("unknown", "Условия неизвестны"),
+            ("included", "Включён / не начисляется"),
+            ("excluded", "Сверх базовой аренды"),
+        ],
+        default="unknown",
+    )
+    vat_rate = models.DecimalField(
+        "НДС сверх базы, %",
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    deposit = models.DecimalField("Депозит, ₽ (отдельно от месяца)", **money)
+    deposit_refundable = models.BooleanField(
+        "Возвратность депозита подтверждена", default=False
+    )
+    commission = models.DecimalField("Комиссия, ₽", **money)
+    adaptation = models.DecimalField("Ремонт / адаптация, ₽", **money)
+    other_once = models.DecimalField("Прочие разовые, ₽", **money)
+    stress = models.DecimalField(
+        "Допущение: увеличение регулярных расходов, ₽/мес.",
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    assumptions = models.TextField(
+        "Допущения и условия (каникулы, индексация)", blank=True
+    )
+    internal_notes = models.TextField(
+        "Внутренние заметки (не попадут в PDF)", blank=True
+    )
+    version = models.PositiveIntegerField(default=1)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.label
+
+
+class Observation(models.Model):
+    SCOPES = [
+        ("premises", "Помещение / блок"),
+        ("room", "Отдельная комната"),
+        ("building", "Здание"),
+        ("reference", "Справочный лот"),
+    ]
+    SOURCES = [
+        ("listing", "Объявление"),
+        ("manual", "Ручной ввод"),
+        ("owner", "Ответ собственника"),
+        ("document", "Документ"),
+        ("archive", "Архивный документ"),
+    ]
+    STATUSES = [
+        ("unknown", "Неизвестно"),
+        ("unverified", "Не подтверждено"),
+        ("confirmed", "Подтверждено"),
+        ("conflict", "Конфликт"),
+    ]
+    premises = models.ForeignKey(
+        Premises, on_delete=models.CASCADE, related_name="observations"
+    )
+    name = models.CharField("Параметр", max_length=100)
+    value = models.DecimalField("Числовое значение", **money)
+    boolean = models.BooleanField(
+        "Да / нет (пусто = неизвестно)", null=True, blank=True
+    )
+    text = models.CharField(
+        "Текст / дополнительное значение", max_length=500, blank=True
+    )
+    unit = models.CharField("Единица", max_length=25, blank=True)
+    scope = models.CharField(
+        "Уровень сведений", max_length=12, choices=SCOPES, default="premises"
+    )
+    locator = models.CharField("Комната / часть объекта", max_length=200, blank=True)
+    source_type = models.CharField(
+        "Тип источника", max_length=12, choices=SOURCES, default="manual"
+    )
+    source = models.CharField("Источник, страница / раздел", max_length=500)
+    source_url = models.URLField("Ссылка на источник", max_length=1500, blank=True)
+    observed_on = models.DateField("Дата сведений")
+    status = models.CharField(
+        "Подтверждение", max_length=12, choices=STATUSES, default="unverified"
+    )
+    confirmation = models.CharField(
+        "Основание подтверждения / разрешения конфликта", max_length=700, blank=True
+    )
+    superseded = models.BooleanField(default=False)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+
+
+class Evaluation(models.Model):
+    premises = models.ForeignKey(
+        Premises, on_delete=models.CASCADE, related_name="evaluations"
+    )
+    profile_version = models.PositiveIntegerField()
+    premises_version = models.PositiveIntegerField()
+    rules_version = models.CharField(max_length=20, default="p0-1")
+    result = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+
+    @property
+    def current(self):
+        return (
+            self.profile_version == self.premises.request.version
+            and self.premises_version == self.premises.version
+        )
+
+
+class Attachment(models.Model):
+    premises = models.ForeignKey(
+        Premises, on_delete=models.CASCADE, related_name="attachments"
+    )
+    filename = models.CharField(max_length=250)
+    content_type = models.CharField(max_length=60)
+    data = models.BinaryField()
+    sha256 = models.CharField(max_length=64)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["premises", "sha256"], name="unique_attachment"
+            )
+        ]
+
+
+class Report(models.Model):
+    request = models.ForeignKey(
+        ClientRequest, on_delete=models.PROTECT, related_name="reports"
+    )
+    version = models.PositiveIntegerField()
+    snapshot = models.JSONField()
+    pdf = models.BinaryField()
+    fingerprint = models.CharField(max_length=64)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["request", "version"], name="unique_report_version"
+            ),
+            models.UniqueConstraint(
+                fields=["request", "fingerprint"], name="unique_report_snapshot"
+            ),
+        ]
+
+
+class PilotApplication(models.Model):
+    agency = models.CharField("Название агентства", max_length=160)
+    city = models.CharField("Город", max_length=120)
+    person = models.CharField("Контактное лицо", max_length=160)
+    contact = models.CharField("Рабочий email или телефон", max_length=160)
+    types = models.CharField(
+        "Типы помещений (необязательно)", max_length=250, blank=True
+    )
+    comment = models.TextField("Комментарий (необязательно)", blank=True)
+    consent = models.BooleanField("Согласен на обработку заявки", default=False)
+    creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
+    fingerprint = models.CharField(max_length=64, unique=True)
+    status = models.CharField("Состояние", max_length=30, default="Новая")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AuditEvent(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    agency = models.ForeignKey(Agency, on_delete=models.PROTECT)
+    action = models.CharField(max_length=60)
+    resource = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)

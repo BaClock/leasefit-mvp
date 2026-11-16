@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "request_header.html" %}
+  <div class="section-heading">
+    <div>
+      <h2>Техническая проверка</h2>
+      <p>Блокеры и открытые вопросы. Экономика показывается отдельно.</p>
+    </div>
+    {% if can_edit %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="version" value="{{ req.version }}">
+        <button {% if not req.ready %}disabled{% endif %}>↻ Проверить / пересчитать все</button>
+      </form>{% endif %}</div>{% if not req.ready %}<div class="notice warning">Проверка недоступна: <a href="{% url 'profile' req.pk %}">добавьте обязательное требование в профиль</a>.</div>{% endif %}
+    {% for c in cards %}
+      <section class="panel">
+        <div class="section-heading">
+          <h2>
+            <a href="{% url 'premises' req.pk c.p.pk %}">{{ c.p.label }} ↗</a>
+          </h2>
+          <span class="pill {% if c.ev %}{{ c.ev.result.status }}{% else %}neutral{% endif %}">{% if c.ev %}{{ c.ev.result.label }}{% else %}○ Не проверено — нужен пересчёт{% endif %}</span>
+        </div>{% if c.ev %}<p class="muted">Проверка {{ c.ev.created_at|date:'d.m.Y H:i' }} · правила {{ c.ev.rules_version }}</p>{% for row in c.ev.result.rows %}
+        {% include "check_row.html" %}
+    {% endfor %}
+    {% include "economics.html" with e=c.ev.result.economics %}
+  {% else %}<p>Оценка отсутствует или исходные данные изменились. Запустите пересчёт.</p>{% endif %}</section>{% empty %}<div class="empty">
+  <h2>Сначала добавьте помещение</h2>
+  <a href="{% url 'objects' req.pk %}">Перейти к вариантам →</a>
+  </div>
+{% endfor %}
+<div class="actions">
+  <a class="button" href="{% url 'compare' req.pk %}">Сравнить варианты →</a>
+</div>
+{% endblock %}

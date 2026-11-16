@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load leasefit_tags %}
+{% block content %}
+  {% include "request_header.html" %}
+  <div class="section-heading">
+    <div>
+      <h2>Сравнение помещений</h2>
+      <p>2–4 варианта одного запроса. Обязательные риски всегда видны.</p>
+    </div>
+  </div>
+  <section class="panel">
+    <form method="get">
+      {{ form.non_field_errors }}{{ form.objects.errors }}
+      <div class="field">
+        <label>{{ form.objects.label }}</label>{{ form.objects }}
+      </div>
+      <label class="inline">
+      <input type="checkbox"
+             name="differences"
+             value="1"
+             {% if differences %}checked{% endif %}> Только различия</label>
+      <button>Сравнить</button>
+    </form>
+  </section>
+  {% if columns %}
+    <div class="compare-scroll"
+         tabindex="0"
+         aria-label="Сравнение. Таблица прокручивается горизонтально">
+      <table class="compare">
+        <thead>
+          <tr>
+            <th>Параметры</th>{% for c in columns %}<th>
+              <a href="{% url 'premises' req.pk c.p.pk %}">{{ c.p.label }}</a>
+              <p>
+                <span class="pill {% if c.ev %}{{ c.ev.result.status }}{% else %}neutral{% endif %}">{% if c.ev %}{{ c.ev.result.label }}{% else %}Не проверено — пересчитать{% endif %}</span>
+              </p>
+              <small>{{ c.ev.created_at|date:'d.m.Y H:i' }}</small>
+            </th>
+  {% endfor %}
+  </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      <tr>
+        <th>{{ row.name }}</th>{% for cell in row.cells %}<td>
+          <strong class="status-text {{ cell.status }}">{{ cell.label }}</strong>
+          <p>{{ cell.value }}</p>
+          <small>{{ cell.reason }}</small>{% if cell.question %}<p class="question">{{ cell.question }}</p>{% endif %}
+          {% for src in cell.sources %}<p class="source">{{ src.source }} · {{ src.date }} · {{ src.scope }}</p>{% endfor %}</td>{% endfor %}</tr>{% endfor %}<tr class="group-row">
+      <th colspan="{{ columns|length|add:1 }}">Расходы · ₽ · отдельно от технического статуса</th>
+    </tr>
+    <tr>
+      <th>Месячная нагрузка / известный подытог</th>{% for c in columns %}<td>
+        <strong class="price">{{ c.e.monthly_total|rub }}</strong>
+        <p>{% if c.e.complete %}Полная нагрузка{% else %}Известный подытог{% endif %}</p>
+        <p class="{% if c.e.gap|positive %}budget-over{% endif %}">{{ c.e.budget_label }}</p>{% if c.e.missing %}<small>Пробелы: {{ c.e.missing|join:', ' }}</small>{% endif %}</td>{% endfor %}</tr>
+    <tr>
+      <th>Разовые платежи</th>{% for c in columns %}<td>{{ c.e.once_total|rub }}<p>{% if c.e.once_complete %}Полная сумма{% else %}Известный подытог · {{ c.e.once_missing|join:', ' }}{% endif %}</p>
+      <small>Депозит не входит в месячную нагрузку.</small>
+      </td>
+    {% endfor %}
+  </tr>
+  <tr>
+    <th>Допустимая базовая аренда</th>{% for c in columns %}<td>{{ c.e.allowed_rent|rub }}</td>{% endfor %}</tr>
+  <tr>
+    <th>Стрессовое допущение</th>{% for c in columns %}<td>+{{ c.e.stress_addition|rub }} → {{ c.e.stress_total|rub }}/мес.</td>{% endfor %}</tr>
+</tbody>
+</table>
+</div>
+<div class="mobile-compare">
+  {% for c in columns %}
+    <section class="panel">
+      <h2>{{ c.p.label }}</h2>
+      <p class="pill {% if c.ev %}{{ c.ev.result.status }}{% else %}neutral{% endif %}">{% if c.ev %}{{ c.ev.result.label }}{% else %}Не проверено — пересчитайте{% endif %}</p>{% for r in c.comparison_rows %}<article class="check-row {{ r.cell.status }}">
+        <h3>{{ r.name }}</h3>
+        <strong>{{ r.cell.label }}</strong>
+        <p>{{ r.cell.value }}</p>
+        <p>{{ r.cell.reason }}</p>{% if r.cell.question %}<p class="question">{{ r.cell.question }}</p>{% endif %}
+        {% for src in r.cell.sources %}<p class="source">{{ src.source }} · {{ src.date }} · {{ src.scope }}</p>{% endfor %}</article>{% endfor %}
+    {% include "economics.html" with e=c.e %}
+  </section>
+{% endfor %}
+</div>
+<div class="actions">
+  <a class="button" href="{% url 'reports' req.pk %}?{{ selected_query }}">Перейти к отчёту →</a>
+  <span class="muted">Совпадающие блокеры и обязательные неизвестные сохранены.</span>
+</div>{% else %}<div class="empty-small">Выберите минимум два варианта. Для одного помещения доступен <a href="{% url 'reports' req.pk %}">одиночный отчёт</a>.</div>{% endif %}
+{% endblock %}

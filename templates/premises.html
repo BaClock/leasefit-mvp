@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "request_header.html" %}
+  <div class="section-heading">
+    <div>
+      <h2>{% if new_object %}Новое помещение{% else %}{{ p.label }}{% endif %}</h2>
+      <p>Объявление — источник сведений. Парсинг не запускается.</p>
+    </div>{% if p.pk %}<a class="button secondary"
+                          href="{% url 'checks' req.pk %}">Перейти к проверке →</a>{% endif %}</div>
+    <form method="post" class="dirty-form">
+      {% csrf_token %}
+      <fieldset {% if not can_edit %}disabled{% endif %}>
+        <section class="panel">
+          <h2>Карточка и коммерческие условия</h2>
+          <p class="hint">Все суммы в ₽. Пусто = неизвестно. 0 = подтверждённое отсутствие платежа. НДС сверх цены относится к базовой аренде; остальные платежи вводите с налогами.</p>
+          <div class="form-grid">{% include "fields.html" %}</div>
+          <button>Сохранить карточку</button>
+        </section>
+      </fieldset>
+    </form>
+    {% if p.pk %}
+      <section class="panel" id="sources">
+        <div class="section-heading">
+          <div>
+            <h2>Технические сведения и источники</h2>
+            <p>Используйте одинаковые названия параметров и единицы в профиле и сведениях.</p>
+          </div>
+          <span class="pill neutral">Карточка v{{ p.version }}</span>
+        </div>
+        {% for o in observations %}
+          <article class="observation {% if o.superseded %}superseded{% endif %}">
+            <div class="section-heading">
+              <h3>{{ o.name }} · {% if o.value != None %}{{ o.value }} {{ o.unit }}{% elif o.boolean != None %}{{ o.boolean|yesno:'Да,Нет' }}{% else %}{{ o.text|default:'Неизвестно' }}{% endif %}</h3>
+              <span class="pill {% if o.status == 'confirmed' and o.source_type != 'archive' %}pass{% elif o.status == 'conflict' %}blocker{% else %}clarify{% endif %}">{{ o.get_status_display }}{% if o.superseded %} · заменено{% endif %}</span>
+            </div>
+            <p>{{ o.get_scope_display }}{% if o.locator %} · {{ o.locator }}{% endif %} · {{ o.get_source_type_display }} · {{ o.observed_on|date:'d.m.Y' }}</p>
+            <p>Источник: {{ o.source }}{% if o.source_url %} · <a href="{{ o.source_url }}" target="_blank" rel="noopener noreferrer">Открыть ↗</a>{% endif %}</p>{% if o.source_type == "archive" %}<p class="warning-text">Архивное значение на дату документа. Текущее состояние не подтверждено.</p>{% endif %}
+            {% if o.scope != "premises" %}<p class="warning-text">Эти сведения не переносятся автоматически на всё помещение.</p>{% endif %}
+            {% if o.confirmation %}<p>Основание: {{ o.confirmation }}</p>{% endif %}
+            {% if can_edit and not o.superseded %}
+              <details>
+                <summary>Выбрать как актуальный источник / разрешить конфликт</summary>
+                <form method="post" action="{% url 'resolve' req.pk p.pk o.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="version" value="{{ p.version }}">
+                  <label for="reason-{{ o.pk }}">Основание выбора (история остальных источников сохранится)</label>
+                  <input id="reason-{{ o.pk }}" name="reason" required maxlength="700">
+                  <button class="secondary">Выбрать источник и подтвердить</button>
+                </form>
+              </details>{% endif %}</article>{% empty %}<p class="empty-small">Сведений пока нет. Все обязательные параметры будут требовать уточнения.</p>{% endfor %}
+          {% if can_edit %}
+            <details open>
+              <summary>＋ Добавить сведения</summary>
+              <form method="post"
+                    action="{% url 'observation_add' req.pk p.pk %}"
+                    class="dirty-form">
+                {% csrf_token %}
+                <input type="hidden" name="version" value="{{ p.version }}">
+                <div class="form-grid">{% include "fields.html" with form=obsform %}</div>
+                <button>Сохранить сведения</button>
+              </form>
+            </details>
+          {% endif %}
+        </section>
+        <section class="panel">
+          <h2>Закрытые вложения</h2>
+          <p>Доступны по правам запроса. Исходники не включаются в клиентский PDF.</p>{% for f in files %}<p>
+            <a href="{% url 'attachment_download' f.pk %}">↓ {{ f.filename }}</a> · {{ f.created_at|date:'d.m.Y' }}</p>{% empty %}<p class="muted">Файлов пока нет.</p>{% endfor %}
+      {% if can_edit %}<form method="post"
+                             enctype="multipart/form-data"
+                             action="{% url 'upload' req.pk p.pk %}">{% csrf_token %}<input type="hidden" name="version" value="{{ p.version }}">{% include "fields.html" with form=uploadform %}<button class="secondary">Загрузить в закрытое хранилище</button>
+      </form>
+{% endif %}
+</section>
+{% if economics %}
+  {% include "economics.html" with e=economics %}
+{% endif %}
+{% endif %}
+{% endblock %}

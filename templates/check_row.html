@@ -1,0 +1,14 @@
+<article class="check-row {{ row.status }}">
+  <div class="section-heading">
+    <h3>{{ row.requirement }}</h3>
+    <span class="pill {{ row.status }}">{{ row.label }}{% if row.priority == "desired" %} · желательное{% endif %}</span>
+  </div>
+  <p>
+    <strong>Значение:</strong> {{ row.value }}
+  </p>
+  <p>{{ row.reason }}</p>{% for src in row.sources %}<p class="source">{{ src.source }} · {{ src.type }} · {{ src.date }} · {{ src.scope }}{% if src.superseded %} · заменено при разрешении конфликта{% endif %}
+    {% if src.url %} · <a href="{{ src.url }}"
+                          target="_blank"
+                          rel="noopener noreferrer">Источник ↗</a>{% endif %}
+    {% if src.confirmation %}<br>Основание: {{ src.confirmation }}{% endif %}</p>{% endfor %}
+{% if row.question %}<div class="question">Вопрос собственнику: {{ row.question }}</div>{% endif %}</article>

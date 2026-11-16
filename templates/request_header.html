@@ -1,0 +1,22 @@
+<div class="breadcrumb">
+  <a href="{% url 'requests' %}">Запросы</a> <span>/</span> {{ req.title }}</div>
+<div class="page-heading">
+  <div>
+    <div class="eyebrow">{{ req.city }} · {{ req.business }}</div>
+    <h1>{{ req.title }}</h1>
+    <p>{{ req.get_stage_display }}{% if req.archived %} · Архив{% endif %} · Профиль v{{ req.version }}{% if not is_owner %} · Просмотр запроса коллеги{% endif %}</p>
+  </div>
+  <div class="pill {% if req.ready %}pass{% else %}neutral{% endif %}">{% if req.ready %}✓ Профиль готов к проверке{% else %}○ Задайте обязательное условие{% endif %}</div>
+</div>
+<nav class="tabs" aria-label="Разделы запроса">
+  <a class="{% if section == 'profile' %}active{% endif %}"
+     href="{% url 'profile' req.pk %}">01 Профиль</a>
+  <a class="{% if section == 'objects' %}active{% endif %}"
+     href="{% url 'objects' req.pk %}">02 Помещения</a>
+  <a class="{% if section == 'checks' %}active{% endif %}"
+     href="{% url 'checks' req.pk %}">03 Проверка</a>
+  <a class="{% if section == 'compare' %}active{% endif %}"
+     href="{% url 'compare' req.pk %}">04 Сравнение</a>
+  <a class="{% if section == 'reports' %}active{% endif %}"
+     href="{% url 'reports' req.pk %}">05 Отчёты</a>
+</nav>

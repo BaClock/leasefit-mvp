@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+  {% if new %}
+    <div class="breadcrumb">
+      <a href="{% url 'requests' %}">Запросы</a> / Новый запрос</div>
+    <h1>Новый запрос</h1>
+    <p class="lead">Сначала потребность клиента. Затем — подходящие помещения.</p>{% else %}
+    {% include "request_header.html" %}
+  {% endif %}
+  <form method="post" class="dirty-form">
+    {% csrf_token %}
+    <fieldset {% if not new and not can_edit %}disabled{% endif %}>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Профиль бизнеса</h2>
+          <span class="muted">* Обязательные поля</span>
+        </div>
+        <div class="form-grid">{% include "fields.html" %}</div>
+        <p class="hint">Бюджет можно оставить неизвестным. Для черновика достаточно названия, города и формата.</p>
+      </section>
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Требования к помещению</h2>
+            <p>Минимум одно обязательное условие для запуска проверки.</p>
+          </div>
+        </div>
+        <p class="hint">Пример для кофейни: «Мощность», кВт, ≥ 15; «Отдельная вытяжка», да / нет. Это условия клиента, а не универсальные нормы.</p>{{ formset.management_form }}{{ formset.non_form_errors }}<div id="requirements">{% for rf in formset %}<div class="requirement-form">{% include "fields.html" with form=rf %}</div>{% endfor %}</div>
+        <template id="requirement-template">
+          <div class="requirement-form">{% include "fields.html" with form=formset.empty_form %}</div>
+        </template>
+        <button type="button" class="secondary" id="add-requirement">＋ Добавить требование</button>
+      </section>
+      <div class="actions">
+        <button>Сохранить профиль →</button>
+        <span class="muted">Правка профиля потребует пересчёта всех вариантов.</span>
+      </div>
+    </fieldset>
+  </form>
+  {% if req.pk and is_owner %}
+    <section class="panel lifecycle">
+      <h2>Состояние запроса</h2>
+      <p>Архив скрывает запрос из активного списка и сохраняет историю. Для правки завершённого запроса верните его в работу.</p>
+      <form method="post" action="{% url 'lifecycle' req.pk %}">{% csrf_token %}<input type="hidden" name="version" value="{{ req.version }}">{% if req.archived %}<button name="action" value="restore" class="secondary">Восстановить из архива</button>{% else %}
+      {% if req.stage == "done" %}<button name="action" value="active" class="secondary">Вернуть в работу</button>{% else %}<button name="action" value="active" class="secondary">В работу</button>
+      <button name="action" value="done" class="secondary">Завершить подбор</button>{% endif %}<button name="action"
+                                                                                                       value="archive"
+                                                                                                       class="danger"
+                                                                                                       data-confirm="Запрос переместится в архив. История сохранится.">Архивировать</button>{% endif %}</form>
+</section>
+{% endif %}
+{% endblock %}

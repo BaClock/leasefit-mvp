@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load leasefit_tags %}
+{% block content %}
+  <div class="page-heading">
+    <div>
+      <div class="eyebrow">КАБИНЕТ РИЕЛТОРА</div>
+      <h1>Клиентские запросы</h1>
+      <p>Проверьте найденные помещения. Объясните выбор клиенту.</p>
+    </div>
+    <a class="button" href="{% url 'request_new' %}">＋ Создать запрос</a>
+  </div>
+  <div class="panel">
+    <form method="get" class="filters">
+      <div class="field">
+        <label for="search">Поиск по названию</label>
+        <input id="search"
+               name="q"
+               value="{{ search }}"
+               placeholder="Например, кофейня на левом берегу">
+      </div>
+      <div class="field">
+        <label for="stage">Состояние</label>
+        <select id="stage" name="stage">
+          <option value="active_all" {% if stage == 'active_all' %}selected{% endif %}>Все активные</option>
+          <option value="draft" {% if stage == 'draft' %}selected{% endif %}>Черновик</option>
+          <option value="active" {% if stage == 'active' %}selected{% endif %}>В работе</option>
+          <option value="done" {% if stage == 'done' %}selected{% endif %}>Завершён</option>
+          <option value="archive" {% if stage == 'archive' %}selected{% endif %}>Архив</option>
+        </select>
+      </div>
+      {% if member.role == "manager" %}
+        <div class="field">
+          <label for="owner">Сотрудник</label>
+          <select id="owner" name="owner">
+            <option value="">Вся команда</option>{% for m in members %}<option value="{{ m.user_id }}"
+                                                                               {% if owner_filter == m.user_id|stringformat:'s' %}selected{% endif %}>{{ m.user.get_full_name|default:m.user.username }}</option>{% endfor %}</select>
+        </div>{% endif %}<button class="secondary">Найти</button>
+    </form>
+  </div>
+  <div class="section-heading">
+    <h2>
+      Подборы <span class="count">{{ requests|length }}</span>
+    </h2>
+    <span class="muted">Завершение подбора не означает сделку</span>
+  </div>
+  <div class="request-grid">
+    {% for req in requests %}
+      <a class="request-card" href="{% url 'profile' req.pk %}">
+        <div class="card-top">
+          <span class="icon-box">⌂</span>
+          <span class="pill neutral">{{ req.get_stage_display }}{% if req.archived %} · Архив{% endif %}</span>
+        </div>
+        <h2>{{ req.title }}</h2>
+        <p>{{ req.city }} · {{ req.business }}</p>
+        <div class="card-stats">
+          <div>
+            <small>МЕСЯЧНЫЙ ЛИМИТ</small>
+            <strong>{{ req.budget|rub }}</strong>
+          </div>
+          <div>
+            <small>ПОМЕЩЕНИЙ</small>
+            <strong>{{ req.object_count }}</strong>
+          </div>
+        </div>
+        <div class="card-bottom">{% if member.role == "manager" %}{{ req.owner.get_full_name|default:req.owner.username }} · {% endif %}{{ req.updated_at|date:'d.m.Y' }}<span>Открыть →</span>
+        </div>
+      </a>{% empty %}
+      <div class="empty">
+        <span class="empty-icon">▦</span>
+        <h2>{% if search %}Ничего не найдено по фильтрам{% else %}Создайте первый запрос{% endif %}</h2>
+        <p>Задайте профиль бизнеса, затем добавьте уже найденные помещения.</p>
+        <a class="button" href="{% url 'request_new' %}">Создать запрос</a>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}

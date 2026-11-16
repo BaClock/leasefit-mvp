@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="auth-panel panel">
+    <h1>Восстановить доступ</h1>
+    <p>Укажите email из приглашения.</p>
+    <form method="post">
+      {% csrf_token %}
+      {% include "fields.html" %}<button>Запросить восстановление</button>
+    </form>
+    <a href="{% url 'login' %}">Вернуться ко входу</a>
+  </div>
+{% endblock %}

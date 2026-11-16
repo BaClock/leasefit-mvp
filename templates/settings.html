@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}<h1>Мой профиль</h1>
+  <section class="panel narrow">
+    <h2>{{ user.get_full_name|default:user.username }}</h2>
+    <p>{{ user.email }}</p>
+    <p>{{ member.agency.name }} · {{ member.get_role_display }}</p>
+    <p>Вопросы доступа — руководителю агентства.{% if support_email %} Поддержка: <a href="mailto:{{ support_email }}">{{ support_email }}</a>{% endif %}</p>
+    <a href="{% url 'password_reset' %}">Изменить пароль через восстановление</a>
+    <form method="post"
+          action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">Выйти из кабинета</button>
+    </form>
+  </section>
+{% endblock %}

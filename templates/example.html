@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}<div class="eyebrow">ВЫМЫШЛЕННЫЙ ПРИМЕР · КОФЕЙНЯ</div>
+<h1>
+  Похожая цена.
+  <br>
+  Разные основания для выбора.
+</h1>
+<p class="lead">Новосибирск · лимит 70 000 ₽/мес. · мощность ≥ 15 кВт · отдельная вытяжка.</p>
+<div class="request-grid">
+  <article class="request-card">
+    <span class="pill pass">Можно рассматривать</span>
+    <h2>Условный вариант А</h2>
+    <strong class="price">73 000 ₽/мес.</strong>
+    <p>15 кВт и вытяжка подтверждены.</p>
+    <p class="budget-over">Превышение бюджета 3 000 ₽.</p>
+  </article>
+  <article class="request-card">
+    <span class="pill clarify">Требует уточнения</span>
+    <h2>Условный вариант Б</h2>
+    <strong class="price">65 000 ₽/мес.</strong>
+    <p>Вытяжка не подтверждена. Попросите документ собственника.</p>
+  </article>
+  <article class="request-card">
+    <span class="pill blocker">Подтверждённый блокер</span>
+    <h2>Условный вариант В</h2>
+    <strong class="price">59 000 ₽/мес.</strong>
+    <p>Подтверждено 12 кВт при требовании ≥ 15 кВт. Низкая цена не отменяет блокер.</p>
+  </article>
+</div>
+<div class="actions">
+  <a class="button" href="{% url 'pilot' %}">Подать заявку на пилот →</a>
+</div>
+{% endblock %}

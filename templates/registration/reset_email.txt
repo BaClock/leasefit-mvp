@@ -1,0 +1,3 @@
+Для восстановления доступа LeaseFIT откройте:
+{{ protocol }}://{{ domain }}{% url 'password_reset_confirm' uidb64=uid token=token %}
+Если вы не запрашивали восстановление, ничего делать не нужно.

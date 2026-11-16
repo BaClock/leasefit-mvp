@@ -1,0 +1,774 @@
+import hashlib, json, uuid
+from datetime import timedelta
+from decimal import Decimal
+from io import BytesIO
+from django.test import TestCase, Client, override_settings
+from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+from django.conf import settings
+from .models import *
+from .services import *
+from .forms import RequirementForm, PilotForm, ObservationForm, AttachmentForm
+from pypdf import PdfReader
+
+
+class AcceptanceTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.agency = Agency.objects.create(name="Условное агентство А")
+        cls.other_agency = Agency.objects.create(name="Условное агентство Б")
+
+        def member(name, agency, role="realtor"):
+            u = User.objects.create_user(
+                username=name, email=name, password="Strong-test-password-942!"
+            )
+            Membership.objects.create(user=u, agency=agency, role=role)
+            return u
+
+        cls.owner = member("agent@example.invalid", cls.agency)
+        cls.colleague = member("colleague@example.invalid", cls.agency)
+        cls.manager = member("leader@example.invalid", cls.agency, "manager")
+        cls.outsider = member("outsider@example.invalid", cls.other_agency, "manager")
+        cls.req = ClientRequest.objects.create(
+            title="Условная кофейня",
+            agency=cls.agency,
+            owner=cls.owner,
+            budget=70000,
+            start_budget=180000,
+            stage="active",
+        )
+        cls.power = Requirement.objects.create(
+            request=cls.req, name="Мощность", unit="кВт", minimum=15
+        )
+        cls.p = Premises.objects.create(
+            request=cls.req,
+            label="Учебный объект А",
+            area=60,
+            rate=1000,
+            operating=8000,
+            utilities=5000,
+            other_monthly=0,
+            vat_mode="included",
+            deposit=60000,
+            commission=20000,
+            adaptation=90000,
+            other_once=0,
+            stress=5000,
+            internal_notes="SECRET_INTERNAL_NOTE",
+        )
+
+    def setUp(self):
+        self.client.force_login(self.owner)
+
+    def observe(self, p=None, **kw):
+        d = dict(
+            premises=p or self.p,
+            name="Мощность",
+            value=15,
+            unit="кВт",
+            source_type="document",
+            source="Условный акт",
+            observed_on=timezone.localdate(),
+            status="confirmed",
+            confirmation="Проверено по акту для помещения",
+            author=self.owner,
+        )
+        d.update(kw)
+        return Observation.objects.create(**d)
+
+    def result(self):
+        return evaluate(self.p, self.owner).result
+
+    def issue(self, objects=None, key=None, comment=""):
+        return issue_report(
+            self.req, objects or [self.p], comment, self.owner, key or uuid.uuid4()
+        )
+
+    def test_12_kw_blocker(self):
+        self.observe(value=12)
+        self.assertEqual(self.result()["status"], "blocker")
+
+    def test_exact_15_kw_passes(self):
+        self.observe()
+        self.assertEqual(self.result()["status"], "pass")
+
+    def test_listing_cannot_confirm_even_if_imported_as_confirmed(self):
+        self.observe(source_type="listing")
+        self.assertEqual(self.result()["status"], "clarify")
+
+    def test_unknown_is_not_zero(self):
+        self.assertEqual(self.result()["status"], "clarify")
+        self.observe(value=0)
+        self.assertEqual(self.result()["status"], "blocker")
+
+    def test_conflicting_sources_need_resolution(self):
+        self.observe(
+            value=12, source_type="listing", status="unverified", confirmation=""
+        )
+        o = self.observe(value=15)
+        self.assertEqual(self.result()["status"], "clarify")
+        response = self.client.post(
+            f"/app/requests/{self.req.pk}/objects/{self.p.pk}/observations/{o.pk}/resolve",
+            {
+                "version": 1,
+                "reason": "Актуальный акт собственника; объявление ошибочно",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.p.refresh_from_db()
+        self.assertEqual(self.result()["status"], "pass")
+        self.assertEqual(self.p.observations.filter(superseded=True).count(), 1)
+
+    def test_archive_building_and_room_never_confirm_premises(self):
+        for scope in ["premises", "building", "room", "reference"]:
+            with self.subTest(scope=scope):
+                self.p.observations.all().delete()
+                self.observe(
+                    scope=scope,
+                    source_type="archive",
+                    observed_on=timezone.localdate() - timedelta(days=3000),
+                )
+                result = self.result()
+                self.assertEqual(result["status"], "clarify")
+                self.assertIn(
+                    str(timezone.localdate() - timedelta(days=3000)),
+                    result["rows"][0]["value"],
+                )
+        self.p.observations.all().delete()
+        self.observe(scope="building", boolean=True)
+        self.assertEqual(self.result()["status"], "clarify")
+
+    def test_desired_does_not_create_blocker(self):
+        self.observe()
+        r = Requirement.objects.create(
+            request=self.req,
+            name="Второй вход",
+            operator="eq",
+            expected=True,
+            priority="desired",
+        )
+        self.observe(name="Второй вход", value=None, boolean=False, unit="")
+        self.assertEqual(self.result()["status"], "pass")
+        self.assertEqual(self.result()["rows"][1]["status"], "desired_fail")
+
+    def test_blocker_priority_keeps_unknowns(self):
+        self.observe(value=12)
+        Requirement.objects.create(request=self.req, name="Вентиляция", operator="eq")
+        r = self.result()
+        self.assertEqual(r["status"], "blocker")
+        self.assertEqual(r["rows"][1]["status"], "clarify")
+
+    def test_unit_mismatch_requires_clarification(self):
+        self.observe(unit="Вт")
+        self.assertEqual(self.result()["status"], "clarify")
+
+    def test_no_required_requirement_prevents_check(self):
+        self.power.priority = "desired"
+        self.power.save()
+        with self.assertRaises(ValueError):
+            self.result()
+        self.assertEqual(Evaluation.objects.count(), 0)
+
+    def test_economy_73000_3000_57000_170000(self):
+        e = economics(self.p)
+        self.assertEqual(Decimal(e["monthly_total"]), 73000)
+        self.assertTrue(e["complete"])
+        self.assertEqual(Decimal(e["gap"]), 3000)
+        self.assertEqual(Decimal(e["allowed_rent"]), 57000)
+        self.assertEqual(Decimal(e["once_total"]), 170000)
+        self.assertEqual(Decimal(e["stress_total"]), 78000)
+        self.observe()
+        self.assertEqual(self.result()["status"], "pass")
+
+    def test_incomplete_monthly_and_budget_warning(self):
+        self.p.other_monthly = None
+        self.p.save()
+        e = economics(self.p)
+        self.assertFalse(e["complete"])
+        self.assertEqual(Decimal(e["monthly_total"]), 73000)
+        self.assertIn("Превышение", e["budget_label"])
+        self.assertIsNone(e["allowed_rent"])
+        self.p.operating = None
+        self.p.save()
+        self.assertNotEqual(
+            economics(self.p)["budget_label"], "В пределах месячного лимита"
+        )
+
+    def test_vat_and_rent_conflict(self):
+        self.p.vat_mode = "excluded"
+        self.p.vat_rate = Decimal("20")
+        self.p.save()
+        e = economics(self.p)
+        self.assertEqual(Decimal(e["monthly_total"]), 85000)
+        self.assertEqual(Decimal(e["allowed_rent"]), 47500)
+        self.p.rent = 50000
+        self.p.save()
+        e = economics(self.p)
+        self.assertTrue(e["rent_conflict"])
+        self.assertFalse(e["complete"])
+
+    def test_negative_remaining_budget(self):
+        self.req.budget = 10000
+        self.req.save()
+        self.p.request = self.req
+        self.assertEqual(Decimal(economics(self.p)["allowed_rent"]), -3000)
+
+    def test_immutable_report_and_staleness(self):
+        self.observe()
+        self.result()
+        old = self.issue()
+        data = bytes(old.pdf)
+        snap = old.snapshot.copy()
+        self.req.version += 1
+        self.req.save()
+        with self.assertRaises(ValueError):
+            self.issue()
+        self.p.request = self.req
+        evaluate(self.p, self.owner)
+        new = self.issue()
+        old.refresh_from_db()
+        self.assertEqual(bytes(old.pdf), data)
+        self.assertEqual(old.snapshot, snap)
+        self.assertEqual(new.version, 2)
+        self.assertEqual(
+            self.client.get(f"/app/reports/{old.pk}/download").status_code, 200
+        )
+
+    def test_premises_edit_invalidates_only_its_check(self):
+        self.observe()
+        self.result()
+        other = Premises.objects.create(request=self.req, label="Б")
+        self.observe(p=other)
+        evaluate(other, self.owner)
+        self.p.version += 1
+        self.p.save()
+        self.assertIsNone(current_evaluation(self.p))
+        self.assertIsNotNone(current_evaluation(other))
+
+    def test_report_duplicate_click_and_duplicate_content(self):
+        self.observe()
+        self.result()
+        key = uuid.uuid4()
+        a = self.issue(key=key)
+        b = self.issue(key=key)
+        c = self.issue()
+        self.assertEqual(a.pk, b.pk)
+        self.assertEqual(a.pk, c.pk)
+        self.assertEqual(Report.objects.count(), 1)
+
+    def test_pdf_cyrillic_sources_costs_and_no_internal_or_files(self):
+        self.observe()
+        self.result()
+        Attachment.objects.create(
+            premises=self.p,
+            filename="CONFIDENTIAL_SOURCE_FILE.pdf",
+            content_type="application/pdf",
+            data=b"ORIGINAL_FILE_CONTENT",
+            sha256="a" * 64,
+            author=self.owner,
+        )
+        r = self.issue(comment="Клиентский комментарий")
+        text = "".join(p.extract_text() for p in PdfReader(BytesIO(bytes(r.pdf))).pages)
+        for s in [
+            "Условная кофейня",
+            "Учебный объект А",
+            "Условный акт",
+            "Клиентский комментарий",
+            "73000",
+            "170000",
+            "3000",
+        ]:
+            self.assertIn(s, text)
+        for s in [
+            "SECRET_INTERNAL_NOTE",
+            "CONFIDENTIAL_SOURCE_FILE",
+            "ORIGINAL_FILE_CONTENT",
+        ]:
+            self.assertNotIn(s, text)
+
+    def test_blocker_report_is_explicitly_rejected(self):
+        self.observe(value=12)
+        self.result()
+        r = self.issue()
+        self.assertEqual(
+            r.snapshot["objects"][0]["decision"], "Отсеян при текущих условиях"
+        )
+
+    def test_differences_keeps_equal_blockers_and_unknown(self):
+        other = Premises.objects.create(request=self.req, label="Вариант Б")
+        self.observe(value=12)
+        self.observe(p=other, value=12)
+        evaluate(self.p, self.owner)
+        evaluate(other, self.owner)
+        self.assertEqual(len(compare_rows([self.p, other], True)), 1)
+        self.p.observations.all().delete()
+        other.observations.all().delete()
+        evaluate(self.p, self.owner)
+        evaluate(other, self.owner)
+        self.assertEqual(len(compare_rows([self.p, other], True)), 1)
+
+    def test_realtor_and_agency_isolation_on_all_routes(self):
+        self.observe()
+        self.result()
+        report = self.issue()
+        f = Attachment.objects.create(
+            premises=self.p,
+            filename="private.pdf",
+            data=b"private",
+            content_type="application/pdf",
+            sha256="b" * 64,
+            author=self.owner,
+        )
+        urls = [
+            f"/app/requests/{self.req.pk}/{s}"
+            for s in ["profile", "objects", "checks", "compare", "reports"]
+        ] + [
+            f"/app/requests/{self.req.pk}/objects/{self.p.pk}",
+            f"/app/reports/{report.pk}/download",
+            f"/app/files/{f.pk}/download",
+        ]
+        for user in [self.colleague, self.outsider]:
+            self.client.force_login(user)
+            for url in urls:
+                with self.subTest(user=user.username, url=url):
+                    self.assertEqual(self.client.get(url).status_code, 404)
+            self.assertEqual(
+                self.client.post(
+                    f"/app/requests/{self.req.pk}/checks", {"version": 1}
+                ).status_code,
+                404,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/app/requests/{self.req.pk}/objects/{self.p.pk}/observations", {}
+                ).status_code,
+                404,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/app/requests/{self.req.pk}/state",
+                    {"version": 1, "action": "archive"},
+                ).status_code,
+                404,
+            )
+
+    def test_manager_reads_but_cannot_modify_colleague_request(self):
+        self.client.force_login(self.manager)
+        for suffix in ["profile", "objects", "checks", "compare", "reports"]:
+            self.assertEqual(
+                self.client.get(f"/app/requests/{self.req.pk}/{suffix}").status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/app/requests/{self.req.pk}/{suffix}", {}
+                ).status_code,
+                405 if suffix in ["objects", "compare"] else 403,
+            )
+        self.assertEqual(
+            self.client.post(
+                f"/app/requests/{self.req.pk}/objects/{self.p.pk}", {}
+            ).status_code,
+            403,
+        )
+
+    def test_deactivated_member_loses_existing_session_and_files(self):
+        self.observe()
+        self.result()
+        r = self.issue()
+        m = self.owner.membership
+        m.active = False
+        m.save()
+        for url in ["/app/requests", f"/app/reports/{r.pk}/download"]:
+            self.assertEqual(self.client.get(url).status_code, 403)
+        self.client.force_login(self.manager)
+        self.assertEqual(
+            self.client.get(f"/app/requests/{self.req.pk}/profile").status_code, 200
+        )
+
+    def test_team_only_manager_and_cannot_disable_last_manager(self):
+        self.assertEqual(self.client.get("/app/team").status_code, 403)
+        self.client.force_login(self.manager)
+        self.client.post(
+            "/app/team",
+            {"action": "deactivate", "member_id": self.manager.membership.pk},
+        )
+        self.manager.membership.refresh_from_db()
+        self.assertTrue(self.manager.membership.active)
+        self.client.post(
+            "/app/team",
+            {"action": "deactivate", "member_id": self.outsider.membership.pk},
+        )
+        self.outsider.membership.refresh_from_db()
+        self.assertTrue(self.outsider.membership.active)
+
+    def test_invite_activation_password_and_single_use(self):
+        self.client.force_login(self.manager)
+        self.client.post(
+            "/app/team",
+            {
+                "action": "invite",
+                "email": "new@example.invalid",
+                "creation_key": uuid.uuid4(),
+            },
+        )
+        i = Invitation.objects.get(email="new@example.invalid")
+        self.client.logout()
+        self.assertEqual(self.client.get(f"/invite/{i.token}").status_code, 200)
+        response = self.client.post(
+            f"/invite/{i.token}",
+            {
+                "name": "Новый сотрудник",
+                "new_password1": "New-strong-password-946!",
+                "new_password2": "New-strong-password-946!",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        u = User.objects.get(username=i.email)
+        self.assertTrue(u.check_password("New-strong-password-946!"))
+        self.assertEqual(u.membership.agency, self.agency)
+        self.assertEqual(self.client.get(f"/invite/{i.token}").status_code, 410)
+
+    def test_expired_invitation(self):
+        i = Invitation.objects.create(
+            agency=self.agency,
+            email="expired@example.invalid",
+            created_by=self.manager,
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        self.assertEqual(self.client.get(f"/invite/{i.token}").status_code, 410)
+
+    def test_pilot_idempotency_contact_validation(self):
+        d = {
+            "agency": "Тестовое",
+            "city": "Новосибирск",
+            "person": "Ирина",
+            "contact": "test@example.invalid",
+            "consent": "on",
+            "creation_key": uuid.uuid4(),
+        }
+        for _ in range(2):
+            self.assertContains(self.client.post("/pilot", d), "Заявка принята")
+        d["creation_key"] = uuid.uuid4()
+        self.client.post("/pilot", d)
+        self.assertEqual(PilotApplication.objects.count(), 1)
+        d["contact"] = "bad"
+        self.assertContains(self.client.post("/pilot", d), "Укажите рабочий email")
+
+    def test_optimistic_conflict_does_not_overwrite(self):
+        d = {
+            "title": "Изменённое",
+            "city": "Новосибирск",
+            "business": "Кофейня",
+            "version": 0,
+            "creation_key": self.req.creation_key,
+            "requirements-TOTAL_FORMS": 0,
+            "requirements-INITIAL_FORMS": 0,
+        }
+        response = self.client.post(f"/app/requests/{self.req.pk}/profile", d)
+        self.assertEqual(response.status_code, 409)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.title, "Условная кофейня")
+
+    def test_requirement_range_negative_and_duplicate_validation(self):
+        self.assertFalse(
+            RequirementForm(
+                {
+                    "name": "Площадь",
+                    "unit": "м²",
+                    "operator": "range",
+                    "minimum": 50,
+                    "maximum": 20,
+                    "priority": "required",
+                }
+            ).is_valid()
+        )
+        self.assertFalse(
+            RequirementForm(
+                {
+                    "name": "Мощность",
+                    "operator": "gte",
+                    "minimum": -1,
+                    "priority": "required",
+                }
+            ).is_valid()
+        )
+
+    def test_files_validate_content_and_not_extension(self):
+        bad = AttachmentForm(
+            files={
+                "file": SimpleUploadedFile(
+                    "fake.pdf", b"not a pdf", content_type="application/pdf"
+                )
+            }
+        )
+        self.assertFalse(bad.is_valid())
+        self.observe()
+        self.result()
+        pdf = bytes(self.issue().pdf)
+        good = AttachmentForm(files={"file": SimpleUploadedFile("any.bin", pdf)})
+        self.assertTrue(good.is_valid())
+
+    def test_cross_request_selection_rejected(self):
+        other = ClientRequest.objects.create(
+            agency=self.agency, owner=self.owner, title="Другой запрос"
+        )
+        foreign = Premises.objects.create(request=other, label="Чужой вариант")
+        response = self.client.get(
+            f"/app/requests/{self.req.pk}/compare", {"objects": [self.p.pk, foreign.pk]}
+        )
+        self.assertContains(response, "Выберите корректный вариант")
+
+    def test_completed_and_archive_require_explicit_reopen(self):
+        self.client.post(
+            f"/app/requests/{self.req.pk}/state", {"version": 1, "action": "done"}
+        )
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.stage, "done")
+        self.assertEqual(
+            self.client.post(
+                f"/app/requests/{self.req.pk}/objects/{self.p.pk}", {}
+            ).status_code,
+            403,
+        )
+        self.client.post(
+            f"/app/requests/{self.req.pk}/state",
+            {"version": self.req.version, "action": "archive"},
+        )
+        self.assertNotContains(self.client.get("/app/requests"), "Условная кофейня")
+        self.assertContains(
+            self.client.get("/app/requests?stage=archive"), "Условная кофейня"
+        )
+
+    def test_csrf_protects_mutations(self):
+        c = Client(enforce_csrf_checks=True)
+        c.force_login(self.owner)
+        self.assertEqual(
+            c.post(f"/app/requests/{self.req.pk}/checks", {"version": 1}).status_code,
+            403,
+        )
+
+    def test_post_login_returns_to_deep_link(self):
+        self.client.logout()
+        url = f"/app/requests/{self.req.pk}/objects"
+        response = self.client.get(url)
+        self.assertIn("next=", response.url)
+        response = self.client.post(
+            "/login",
+            {
+                "username": self.owner.username,
+                "password": "Strong-test-password-942!",
+                "next": url,
+            },
+        )
+        self.assertRedirects(response, url)
+
+    def test_archive_fixture_scope_and_dates(self):
+        records = json.loads(
+            (settings.BASE_DIR / "tests/data/archive_samples.json").read_text()
+        )
+        self.assertEqual(
+            {r["scope"] for r in records}, {"premises", "building", "room", "reference"}
+        )
+        for row in records:
+            self.assertTrue(row["date"])
+            self.assertTrue(row["source_url"])
+
+    def test_full_http_journey_without_crm(self):
+        # A newly invited user proceeds through the same server forms as the browser.
+        inv = Invitation.objects.create(
+            agency=self.agency,
+            email="journey@example.invalid",
+            created_by=self.manager,
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        c = Client()
+        activation = c.post(
+            f"/invite/{inv.token}",
+            {
+                "name": "Тестовый риелтор",
+                "new_password1": "Sufficiently-Random-8jN6%",
+                "new_password2": "Sufficiently-Random-8jN6%",
+            },
+        )
+        self.assertEqual(activation.status_code, 302)
+        request_key = uuid.uuid4()
+        profile = {
+            "title": "Кофейня · сквозной тест",
+            "city": "Новосибирск",
+            "business": "Кофейня",
+            "budget": "70000",
+            "version": 1,
+            "creation_key": request_key,
+            "requirements-TOTAL_FORMS": 1,
+            "requirements-INITIAL_FORMS": 0,
+            "requirements-0-name": "Мощность",
+            "requirements-0-unit": "кВт",
+            "requirements-0-operator": "gte",
+            "requirements-0-minimum": "15",
+            "requirements-0-expected": "on",
+            "requirements-0-priority": "required",
+        }
+        response = c.post("/app/requests/new", profile)
+        self.assertEqual(response.status_code, 302)
+        req = ClientRequest.objects.get(creation_key=request_key)
+        c.post("/app/requests/new", profile)
+        self.assertEqual(
+            ClientRequest.objects.filter(creation_key=request_key).count(), 1
+        )
+        for label, power in [("Вариант А", 15), ("Вариант Б", 12)]:
+            pkey = uuid.uuid4()
+            data = {
+                "label": label,
+                "area": "60",
+                "rate": "1000",
+                "operating": "8000",
+                "utilities": "5000",
+                "other_monthly": "0",
+                "vat_mode": "included",
+                "commercial_source_type": "manual",
+                "commercial_status": "unverified",
+                "deposit": "60000",
+                "commission": "20000",
+                "adaptation": "90000",
+                "other_once": "0",
+                "stress": "5000",
+                "version": 1,
+                "creation_key": pkey,
+            }
+            url = f"/app/requests/{req.pk}/objects/new"
+            self.assertEqual(c.post(url, data).status_code, 302)
+            c.post(url, data)
+            self.assertEqual(Premises.objects.filter(creation_key=pkey).count(), 1)
+            p = Premises.objects.get(creation_key=pkey)
+            okey = uuid.uuid4()
+            observation = {
+                "name": "Мощность",
+                "value": str(power),
+                "unit": "кВт",
+                "scope": "premises",
+                "source_type": "document",
+                "source": "Условный акт",
+                "observed_on": str(timezone.localdate()),
+                "status": "confirmed",
+                "confirmation": "Условный подтверждающий документ",
+                "version": 1,
+                "creation_key": okey,
+            }
+            url = f"/app/requests/{req.pk}/objects/{p.pk}/observations"
+            self.assertEqual(c.post(url, observation).status_code, 302)
+            c.post(url, observation)
+            self.assertEqual(Observation.objects.filter(creation_key=okey).count(), 1)
+        self.assertEqual(
+            c.post(f"/app/requests/{req.pk}/checks", {"version": 1}).status_code, 302
+        )
+        ids = list(req.premises.values_list("id", flat=True))
+        self.assertContains(
+            c.get(
+                f"/app/requests/{req.pk}/compare", {"objects": ids, "differences": "1"}
+            ),
+            "Блокер",
+        )
+        report_form = {
+            "objects": ids,
+            "comment": "Учебный подбор",
+            "creation_key": uuid.uuid4(),
+            "action": "preview",
+        }
+        url = f"/app/requests/{req.pk}/reports"
+        self.assertContains(c.post(url, report_form), "ПРЕДПРОСМОТР КЛИЕНТСКОЙ ВЕРСИИ")
+        report_form["action"] = "issue"
+        self.assertEqual(c.post(url, report_form).status_code, 302)
+        c.post(url, report_form)
+        self.assertEqual(req.reports.count(), 1)
+        report = req.reports.get()
+        response = c.get(f"/app/reports/{report.pk}/download")
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF-"))
+
+
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from django.db import connection, connections
+from django.test import TransactionTestCase
+from unittest import skipUnless
+
+
+@skipUnless(
+    connection.vendor == "postgresql", "Row-lock concurrency is verified on PostgreSQL"
+)
+class ConcurrentSubmissionTests(TransactionTestCase):
+    def setUp(self):
+        self.a = Agency.objects.create(name="Concurrency demo")
+        self.u = User.objects.create_user(
+            "concurrency@example.invalid", password="Strong-test-password-975!"
+        )
+        Membership.objects.create(user=self.u, agency=self.a)
+        self.req = ClientRequest.objects.create(
+            agency=self.a, owner=self.u, title="Concurrency demo"
+        )
+        Requirement.objects.create(
+            request=self.req, name="Мощность", unit="кВт", minimum=15
+        )
+        self.p = Premises.objects.create(request=self.req, label="Условное помещение")
+        Observation.objects.create(
+            premises=self.p,
+            name="Мощность",
+            unit="кВт",
+            value=15,
+            status="confirmed",
+            source_type="document",
+            source="Демо",
+            observed_on=timezone.localdate(),
+            confirmation="Демо",
+            author=self.u,
+        )
+        evaluate(self.p, self.u)
+
+    def test_concurrent_report_submissions_are_single_version(self):
+        barrier = Barrier(2)
+
+        def worker(_):
+            try:
+                req = ClientRequest.objects.get(pk=self.req.pk)
+                p = Premises.objects.get(pk=self.p.pk)
+                u = User.objects.get(pk=self.u.pk)
+                barrier.wait(timeout=10)
+                return issue_report(req, [p], "", u, uuid.uuid4()).pk
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            ids = list(pool.map(worker, range(2)))
+        self.assertEqual(ids[0], ids[1])
+        self.assertEqual(Report.objects.count(), 1)
+
+    def test_concurrent_pilot_submissions_are_single_record(self):
+        barrier = Barrier(2)
+
+        def worker(_):
+            try:
+                barrier.wait(timeout=10)
+                return (
+                    Client()
+                    .post(
+                        "/pilot",
+                        {
+                            "agency": "Демо",
+                            "city": "Новосибирск",
+                            "person": "Демо",
+                            "contact": "demo@example.invalid",
+                            "consent": "on",
+                            "creation_key": uuid.uuid4(),
+                        },
+                    )
+                    .status_code
+                )
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(worker, range(2)))
+        self.assertEqual(statuses, [200, 200])
+        self.assertEqual(PilotApplication.objects.count(), 1)

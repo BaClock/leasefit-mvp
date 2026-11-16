@@ -1,0 +1,39 @@
+{% load leasefit_tags %}
+<section class="panel economics">
+  <h2>Экономика аренды</h2>
+  <p class="source">Общие условия расчёта: {{ e.commercial_evidence.source }} · {{ e.commercial_evidence.type }} · {{ e.commercial_evidence.date }} · {{ e.commercial_evidence.status }} · {{ e.commercial_evidence.scope }}{% if e.commercial_evidence.confirmation %}<br>Основание: {{ e.commercial_evidence.confirmation }}{% endif %}</p>
+  <div class="metrics">
+    <div>
+      <small>{% if e.complete %}Полная месячная нагрузка{% else %}Известный месячный подытог{% endif %}</small>
+      <strong>{{ e.monthly_total|rub }}</strong>
+      <span class="{% if e.gap|positive %}budget-over{% else %}muted{% endif %}">{{ e.budget_label }}</span>
+    </div>
+    <div>
+      <small>{% if e.once_complete %}Разовые затраты{% else %}Известный разовый подытог{% endif %}</small>
+      <strong>{{ e.once_total|rub }}</strong>
+      <span class="muted">Депозит отдельно от месяца</span>
+    </div>
+    <div>
+      <small>Допустимая базовая аренда</small>
+      <strong>{{ e.allowed_rent|rub }}</strong>
+      <span class="muted">{% if e.allowed_rent|negative %}Нет запаса на базовую аренду{% else %}По месячному лимиту клиента{% endif %}</span>
+    </div>
+  </div>
+  <div class="split">
+    <div>
+      <h3>Ежемесячные платежи</h3>{% for label,v in e.monthly %}<div class="cost-row">
+        <span>{{ label }}</span>
+        <strong>{{ v|rub }}</strong>
+      </div>
+    {% endfor %}
+  {% if e.missing %}<p class="warning-text">Не определено: {{ e.missing|join:', ' }}. Итог неполный.</p>{% endif %}</div>
+  <div>
+    <h3>Разовые платежи</h3>{% for label,v in e.once %}<div class="cost-row">
+      <span>{{ label }}</span>
+      <strong>{{ v|rub }}</strong>
+    </div>{% endfor %}<p class="muted">Возвратность депозита {% if e.deposit_refundable %}подтверждена{% else %}не подтверждена{% endif %}.</p>{% if e.once_missing %}<p class="warning-text">Не определено: {{ e.once_missing|join:', ' }}.</p>{% endif %}
+{% if e.start_gap != None %}<p>Отклонение от стартового бюджета: {{ e.start_gap|rub }}</p>{% endif %}</div>
+</div>
+<p class="hint">Стрессовое допущение: +{{ e.stress_addition|rub }}/мес. → {{ e.stress_total|rub }}/мес. Полнота соответствует базовому сценарию.</p>
+<p>Допущения / условия: {{ e.assumptions|default:'Дополнительные допущения не заданы' }}</p>
+</section>
