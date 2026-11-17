@@ -6,7 +6,7 @@
       <h2>{% if new_object %}Новое помещение{% else %}{{ p.label }}{% endif %}</h2>
       <p>Объявление — источник сведений. Парсинг не запускается.</p>
     </div>{% if p.pk %}<a class="button secondary"
-                          href="{% url 'checks' req.pk %}">Перейти к проверке →</a>{% endif %}</div>
+                          href="{% url 'compare' req.pk %}">Далее: проверка и сравнение →</a>{% endif %}</div>
     <form method="post" class="dirty-form">
       {% csrf_token %}
       <fieldset {% if not can_edit %}disabled{% endif %}>
@@ -15,6 +15,7 @@
           <p class="hint">Все суммы в ₽. Пусто = неизвестно. 0 = подтверждённое отсутствие платежа. НДС сверх цены относится к базовой аренде; остальные платежи вводите с налогами.</p>
           <div class="form-grid">{% include "fields.html" %}</div>
           <button>Сохранить карточку</button>
+          <button name="action" value="next" class="secondary">Сохранить и далее →</button>
         </section>
       </fieldset>
     </form>
@@ -76,4 +77,5 @@
   {% include "economics.html" with e=economics %}
 {% endif %}
 {% endif %}
-{% endblock %}
+<div class="actions">
+  <a class="button secondary" href="{% url 'objects' req.pk %}">← Помещения запроса</a>{% if p.pk %}<a class="button" href="{% url 'compare' req.pk %}">Далее: проверка и сравнение →</a>{% endif %}</div>{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "admin/index.html" %}
+{% block content %}
+  {% if user.is_superuser %}
+    <p>
+      <a href="{% url 'parser' %}">Парсинг объявлений — предварительный просмотр</a>
+    </p>{% endif %}{{ block.super }}{% endblock %}

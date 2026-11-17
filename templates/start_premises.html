@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}<h1>Добавить помещение</h1>
+  <p class="lead">Помещение сохраняется в запросе: его требования определяют результат проверки.</p>
+  <section class="panel narrow">
+    {% if has_requests %}
+      <form method="post">
+        {% csrf_token %}
+        {% include "fields.html" %}<button>Далее: карточка помещения →</button>
+      </form>{% else %}<h2>Сначала создайте запрос</h2>
+      <p>Нет своих запросов, доступных для добавления. Завершённый запрос можно вернуть в работу.</p>
+      <a class="button" href="{% url 'request_new' %}">Создать запрос →</a>{% endif %}</section>
+  <a href="{% url 'all_premises' %}">← Все помещения</a>{% endblock %}

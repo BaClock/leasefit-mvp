@@ -49,12 +49,25 @@ with sync_playwright() as pw:
         )
         page.screenshot(path=str(out / f"profile-{width}.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
-    page.get_by_role("button", name="Сохранить профиль").click()
+    page.get_by_role("button", name="Далее: уточнить профиль").click()
+    page.wait_for_url(re.compile(r"/app/requests/\d+/refine$"))
+    assert page.locator("#id_power").count() == 0  # Already set in the profile.
+    page.locator("#id_geography").fill("Левый берег")
+    page.locator("#id_area_min").fill("50")
+    page.locator("#id_area_max").fill("70")
+    page.get_by_role("button", name="Далее: помещения").click()
     page.wait_for_url(re.compile(r"/app/requests/\d+/objects$"))
     req_path = page.url.replace(base, "").removesuffix("/objects")
     ids = []
     for label, power in [("Учебный вариант А", 15), ("Учебный вариант Б", 12)]:
-        page.goto(base + req_path + "/objects/new")
+        if not ids:
+            page.get_by_role("link", name="Помещения", exact=True).click()
+            expect(page.get_by_role("heading", name="Все помещения")).to_be_visible()
+            page.get_by_role("link", name="＋ Добавить помещение").click()
+            page.locator("#id_request_id").select_option(req_path.split("/")[-1])
+            page.get_by_role("button", name="Далее: карточка помещения").click()
+        else:
+            page.goto(base + req_path + "/objects/new")
         for name, value in {
             "label": label,
             "area": 60,
@@ -88,8 +101,8 @@ with sync_playwright() as pw:
         page.locator("#id_status").select_option("confirmed")
         page.get_by_role("button", name="Сохранить сведения").click()
         expect(page.get_by_role("status").first).to_contain_text("Сведения сохранены")
-    page.goto(base + req_path + "/checks")
-    page.get_by_role("button", name="↻ Проверить / пересчитать все").click()
+    page.goto(base + req_path + "/compare")
+    page.get_by_role("button", name="↻ Проверить / пересчитать выбранные").click()
     expect(page.locator("main")).to_contain_text("Есть подтверждённый блокер")
     expect(page.locator("main")).to_contain_text("Превышение 3 000")
     page.goto(
@@ -109,20 +122,28 @@ with sync_playwright() as pw:
         ).to_contain_text("Блокер")
         page.screenshot(path=str(out / f"compare-{width}.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
-    page.get_by_role("link", name="Перейти к отчёту").click()
+    parameter = page.locator(
+        '.report-parameters button[data-parameter^="requirement:"]'
+    )
+    parameter.click()
+    expect(parameter).to_contain_text("В отчёте")
+    page.locator(
+        '.report-parameters button[data-parameter="economics:monthly"]'
+    ).click()
+    page.locator('.report-parameters button[data-parameter="future:leads"]').click()
     expect(page.locator(".report-preview")).to_contain_text(
         "Отсеян при текущих условиях"
     )
-    page.get_by_role("button", name="Сформировать PDF").click()
+    page.get_by_role("button", name="Сформировать отчёт").click()
     expect(page.get_by_role("status")).to_contain_text("Клиентская версия 1 сохранена")
     with page.expect_download() as download:
         page.get_by_role("link", name="Скачать PDF").click()
-    target = out / "LeaseFIT-browser-example.pdf"
+    target = out / "LeaseFIT-v2-browser-example.pdf"
     download.value.save_as(str(target))
     assert target.read_bytes().startswith(b"%PDF-")
     assert not errors, errors
     context.close()
     browser.close()
 print(
-    "PASS: invitation → profile → two premises → checks → compare → PDF download; 1440/768/390 px; no horizontal page overflow or JavaScript errors."
+    "PASS: invitation → profile → refinement → global premises → combined check/compare → parameter selection → PDF download; 1440/768/390 px; no horizontal page overflow or JavaScript errors."
 )

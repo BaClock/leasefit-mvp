@@ -7,4 +7,12 @@ def navigation(request):
         if request.user.is_authenticated
         else None
     )
-    return {"member": member, "support_email": settings.SUPPORT_EMAIL}
+    return {
+        "member": member,
+        "support_email": settings.SUPPORT_EMAIL,
+        "can_parse": request.user.is_authenticated
+        and (
+            request.user.is_superuser
+            or (member and member.active and member.role == "manager")
+        ),
+    }

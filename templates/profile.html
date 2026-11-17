@@ -32,11 +32,13 @@
         <button type="button" class="secondary" id="add-requirement">＋ Добавить требование</button>
       </section>
       <div class="actions">
-        <button>Сохранить профиль →</button>
+        <button>Далее: уточнить профиль →</button>
         <span class="muted">Правка профиля потребует пересчёта всех вариантов.</span>
       </div>
     </fieldset>
   </form>
+  {% if req.pk and not can_edit %}<a class="button"
+                                     href="{% url 'refine' req.pk %}">Далее: уточнения →</a>{% endif %}
   {% if req.pk and is_owner %}
     <section class="panel lifecycle">
       <h2>Состояние запроса</h2>

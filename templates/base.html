@@ -21,44 +21,53 @@
           <p class="agency">{{ member.agency.name }}</p>
           <nav aria-label="Главное меню">
             <a class="nav-item" aria-label="Запросы" href="{% url 'requests' %}">▦ <span>Запросы</span>
-              </a>{% if member.role == "manager" %}<a class="nav-item"
-                                                      aria-label="Команда"
-                                                      href="{% url 'team' %}">♙ <span>Команда</span>
-              </a>{% endif %}<a class="nav-item"
-                                aria-label="Мой профиль"
-                                href="{% url 'settings' %}">⚙ <span>Мой профиль</span>
             </a>
-          </nav>
-          <div class="sidebar-bottom">
-            <span class="eyebrow">УЧЕБНЫЙ ПИЛОТ · P0</span>
-            <p>
-              От требований клиента
-              <br>
-              к обоснованному выбору.
-            </p>
-            <div class="user">
-              {{ user.get_full_name|default:user.username }}<small>{{ member.get_role_display }}</small>
-            </div>
-            <form method="post"
-                  action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Выйти из кабинета →</button>
-            </form>
-          </div>
-        </aside>
+            <a class="nav-item"
+               aria-label="Помещения"
+               href="{% url 'all_premises' %}">⌂ <span>Помещения</span>
+              </a>{% if can_parse %}<a class="nav-item"
+                                       aria-label="Парсинг"
+                                       href="{% url 'parser' %}">↻ <span>Парсинг</span>
+              </a>
       {% endif %}
-      <div class="main-wrap">
-        <header class="topbar">
-          <span>Коммерческие помещения / <strong>LeaseFIT</strong>
-          </span>
-          <span class="pill neutral">Новосибирск · пилот</span>
-        </header>
-        <main id="main">{% for message in messages %}<div role="status"
-                                                          class="notice {{ message.tags }}">{{ message }}</div>{% endfor %}
-          {% block content %}{% endblock %}
-        </main>
-        <footer>
-          LeaseFIT · Проверка помещений под конкретный бизнес<span>Учебные данные · без CRM</span>
-        </footer>
+      {% if member.role == "manager" %}<a class="nav-item"
+                                          aria-label="Команда"
+                                          href="{% url 'team' %}">♙ <span>Команда</span>
+        </a>{% endif %}<a class="nav-item"
+                          aria-label="Мой профиль"
+                          href="{% url 'settings' %}">⚙ <span>Мой профиль</span>
+      </a>
+    </nav>
+    <div class="sidebar-bottom">
+      <span class="eyebrow">УЧЕБНЫЙ ПИЛОТ · P0</span>
+      <p>
+        От требований клиента
+        <br>
+        к обоснованному выбору.
+      </p>
+      <div class="user">
+        {{ user.get_full_name|default:user.username }}<small>{{ member.get_role_display }}</small>
       </div>
+      <form method="post"
+            action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Выйти из кабинета →</button>
+      </form>
     </div>
-  </body>
+  </aside>
+{% endif %}
+<div class="main-wrap">
+  <header class="topbar">
+    <span>Коммерческие помещения / <strong>LeaseFIT</strong>
+    </span>
+    <span class="pill neutral">Новосибирск · пилот</span>
+  </header>
+  <main id="main">{% for message in messages %}<div role="status"
+                                                    class="notice {{ message.tags }}">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    LeaseFIT · Проверка помещений под конкретный бизнес<span>Учебные данные · без CRM</span>
+  </footer>
+</div>
+</div>
+</body>
 </html>

@@ -67,6 +67,9 @@ class ClientRequest(models.Model):
     def ready(self):
         return self.requirements.filter(priority="required").exists()
 
+    report_parameters = models.JSONField(default=list, blank=True)
+    selection_version = models.PositiveIntegerField(default=1)
+
     def __str__(self):
         return self.title
 

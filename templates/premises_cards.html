@@ -1,0 +1,29 @@
+{% load leasefit_tags %}
+<div class="request-grid">
+  {% for card in cards %}
+    <a class="request-card"
+       href="{% url 'premises' card.p.request_id card.p.pk %}">
+      <div class="card-top">
+        <span class="icon-box">⌂</span>
+        <span class="pill {% if card.ev %}{{ card.ev.result.status }}{% else %}neutral{% endif %}">{% if card.ev %}{{ card.ev.result.label }}{% else %}○ Не проверено{% endif %}</span>
+      </div>
+      <h2>{{ card.p.label }}</h2>
+      <p>{{ card.p.request.city }} · {{ card.p.request.title }}{% if card.p.request.archived %} · Архив{% endif %}</p>
+      <p>Этаж {{ card.p.floor|default:'неизвестен' }} · {{ card.p.number|default:'номер не задан' }}</p>
+      <div class="card-stats">
+        <div>
+          <small>{% if card.economics.complete %}НАГРУЗКА В МЕСЯЦ{% else %}ИЗВЕСТНЫЙ ПОДЫТОГ{% endif %}</small>
+          <strong>{{ card.economics.monthly_total|rub }}</strong>
+        </div>
+      </div>
+      <p class="{% if card.economics.gap|positive %}budget-over{% else %}muted{% endif %}">{{ card.economics.budget_label }}</p>
+      <div class="card-bottom">
+        {{ card.p.observations.count }} сведений<span>Открыть карточку →</span>
+      </div>
+    </a>{% empty %}
+    <div class="empty">
+      <h2>Помещений пока нет</h2>
+      <p>Добавьте вариант по адресу или рабочей метке.</p>
+    </div>
+  {% endfor %}
+</div>

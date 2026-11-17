@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "request_header.html" %}
+  <section class="panel narrow">
+    <div class="eyebrow">ПРОВЕРИМ, НИЧЕГО ЛИ НЕ ПРОПУСТИЛИ</div>
+    <h2>Что поможет сузить выбор?</h2>
+    <p>Уточните район, бюджет и параметры, которых пока нет в профиле. Уже заданные технические требования здесь не повторяются.</p>
+    <p class="hint">Оставьте поле пустым, если ответа пока нет. Введённый технический параметр станет требованием с выбранной важностью. Эти вопросы не задают нормативы для бизнеса.</p>
+    <form method="post" class="dirty-form">
+      {% csrf_token %}
+      <fieldset {% if not can_edit %}disabled{% endif %}>
+        {% include "fields.html" %}
+        <div class="actions">
+          <a class="button secondary" href="{% url 'profile' req.pk %}">← Назад</a>
+          <button>Далее: помещения →</button>
+        </div>
+      </fieldset>
+    </form>{% if not can_edit %}<a class="button"
+                                   href="{% url 'objects' req.pk %}">Далее: помещения →</a>{% endif %}</section>{% endblock %}

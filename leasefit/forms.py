@@ -240,3 +240,114 @@ class SelectionForm(forms.Form):
                 f"Выберите от {self.minimum} до 4 вариантов одного запроса."
             )
         return q
+
+
+class RefinementForm(forms.Form):
+    version = forms.IntegerField(widget=forms.HiddenInput)
+    budget = forms.DecimalField(
+        label="Какой предел полной нагрузки в месяц, ₽?",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    geography = forms.CharField(
+        label="Какие районы или ориентиры подходят?", required=False, max_length=250
+    )
+    area_min = forms.DecimalField(
+        label="Площадь от, м²",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    area_max = forms.DecimalField(
+        label="Площадь до, м²",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    area_priority = forms.ChoiceField(
+        label="Насколько важна площадь?",
+        choices=Requirement.PRIORITIES[:2],
+        initial="desired",
+    )
+    power = forms.DecimalField(
+        label="Какая минимальная выделенная мощность нужна, кВт?",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    power_priority = forms.ChoiceField(
+        label="Насколько важна мощность?",
+        choices=Requirement.PRIORITIES[:2],
+        initial="desired",
+    )
+    water = forms.ChoiceField(
+        label="Нужно подключение воды в помещении?",
+        required=False,
+        choices=[
+            ("", "Пока неизвестно"),
+            ("yes", "Да, требуется"),
+            ("na", "Не требуется для этого бизнеса"),
+        ],
+    )
+    water_priority = forms.ChoiceField(
+        label="Насколько важна вода?",
+        choices=Requirement.PRIORITIES[:2],
+        initial="desired",
+    )
+    ventilation = forms.ChoiceField(
+        label="Нужна отдельная вытяжка?",
+        required=False,
+        choices=[
+            ("", "Пока неизвестно"),
+            ("yes", "Да, требуется"),
+            ("na", "Не требуется для этого бизнеса"),
+        ],
+    )
+    ventilation_priority = forms.ChoiceField(
+        label="Насколько важна вытяжка?",
+        choices=Requirement.PRIORITIES[:2],
+        initial="desired",
+    )
+
+    def __init__(self, *args, request_obj, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.request_obj = request_obj
+        self.initial.update(
+            version=request_obj.version,
+            budget=request_obj.budget,
+            geography=request_obj.geography,
+        )
+        names = " ".join(
+            request_obj.requirements.values_list("name", flat=True)
+        ).casefold()
+        self.groups = []
+        for key, words, fields in [
+            ("area", ["площад", "area"], ["area_min", "area_max", "area_priority"]),
+            ("power", ["мощност", "электр", "power"], ["power", "power_priority"]),
+            ("water", ["вод", "water"], ["water", "water_priority"]),
+            (
+                "ventilation",
+                ["вытяж", "вентиля", "ventilation"],
+                ["ventilation", "ventilation_priority"],
+            ),
+        ]:
+            if any(word in names for word in words):
+                for field in fields:
+                    self.fields.pop(field)
+            else:
+                self.groups.append(key)
+
+    def clean(self):
+        d = super().clean()
+        if (
+            d.get("area_min") is not None
+            and d.get("area_max") is not None
+            and d["area_min"] > d["area_max"]
+        ):
+            self.add_error("area_max", "Верхняя граница меньше нижней.")
+        return d

@@ -286,7 +286,32 @@ def current_evaluation(p):
     return ev if ev and ev.current and ev.rules_version == RULES_VERSION else None
 
 
-def report_snapshot(req, objects, comment):
+def report_parameter_choices(req):
+    return [
+        (f"requirement:{r.pk}", str(r))
+        for r in req.requirements.filter(priority="desired").order_by("id")
+    ] + [
+        ("economics:monthly", "Расшифровка ежемесячных платежей"),
+        ("economics:once", "Расшифровка разовых платежей"),
+        ("economics:stress", "Стрессовый сценарий"),
+        ("future:leads", "Будущий модуль: карта лидов"),
+    ]
+
+
+def report_snapshot(req, objects, comment, parameters=None):
+    selected_parameters = (
+        set(dict(report_parameter_choices(req)))
+        if parameters is None
+        else set(parameters) & set(dict(report_parameter_choices(req)))
+    )
+    mandatory_names = set(
+        req.requirements.filter(priority="required").values_list("name", flat=True)
+    )
+    wanted_names = mandatory_names | {
+        r.name
+        for r in req.requirements.filter(priority="desired")
+        if f"requirement:{r.pk}" in selected_parameters
+    }
     items = []
     identifiers = []
     for p in objects:
@@ -317,10 +342,15 @@ def report_snapshot(req, objects, comment):
                 "checked_at": timezone.localtime(ev.created_at).isoformat(),
                 "decision": decision,
                 **ev.result,
+                "rows": [
+                    row for row in ev.result["rows"] if row["name"] in wanted_names
+                ],
             }
         )
     return serial(
         {
+            "layout_version": "presentation-v2",
+            "parameters": sorted(selected_parameters),
             "rules_version": RULES_VERSION,
             "request": req.title,
             "city": req.city,
@@ -340,7 +370,7 @@ def report_snapshot(req, objects, comment):
 
 
 @transaction.atomic
-def issue_report(req, objects, comment, user, key):
+def issue_report(req, objects, comment, user, key, parameters=None):
     req = ClientRequest.objects.select_for_update().get(pk=req.pk)
     if req.archived or req.stage == "done":
         raise ValueError("Верните запрос в работу перед выпуском отчёта.")
@@ -351,7 +381,7 @@ def issue_report(req, objects, comment, user, key):
     objects = list(req.premises.filter(pk__in=[p.pk for p in objects]).order_by("id"))
     if not 1 <= len(objects) <= 4:
         raise ValueError("Выберите от 1 до 4 вариантов.")
-    snap = report_snapshot(req, objects, comment)
+    snap = report_snapshot(req, objects, comment, parameters=parameters)
     fingerprint = hashlib.sha256(
         json.dumps(snap, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()

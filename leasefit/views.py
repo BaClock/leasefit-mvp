@@ -2,12 +2,13 @@ import hashlib, json, uuid
 from datetime import timedelta
 from functools import wraps
 from pathlib import Path
+from django import forms
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -141,7 +142,7 @@ def profile(request, pk=None):
                 else None
             )
             if existing:
-                return redirect("profile", pk=existing.pk)
+                return redirect("refine", pk=existing.pk)
         valid = form.is_valid() and formset.is_valid()
         ctx = {
             **tabs_context(request, obj, "profile"),
@@ -155,7 +156,7 @@ def profile(request, pk=None):
             obj = form.save(commit=False)
             if not pk:
                 obj.creation_key = form.cleaned_data["creation_key"]
-            if pk:
+            if pk and (form.has_changed() or formset.has_changed()):
                 obj.version += 1
             obj.save()
             formset.instance = obj
@@ -167,7 +168,7 @@ def profile(request, pk=None):
                 if pk
                 else "Запрос создан. Добавьте варианты помещений.",
             )
-            return redirect("profile" if pk else "objects", pk=obj.pk)
+            return redirect("refine", pk=obj.pk)
     return render(
         request,
         "profile.html",
@@ -283,6 +284,8 @@ def premises_edit(request, pk, object_id=None):
                 request,
                 "Карточка сохранена. Добавьте сведения с источниками и запустите проверку.",
             )
+            if request.POST.get("action") == "next":
+                return redirect("compare", pk=pk)
             return redirect("premises", pk=pk, object_id=p.pk)
     if p.pk:
         ctx.update(
@@ -448,6 +451,169 @@ def attachment_download(request, file_id):
 
 @workspace
 @transaction.atomic
+def compare(request, pk):
+    write = request.method == "POST"
+    read_only_action = request.POST.get("action") == "show"
+    obj = load_request(
+        request,
+        pk,
+        write=write and not read_only_action,
+        lock=write and not read_only_action,
+    )
+    differences = (request.POST if write else request.GET).get("differences") == "1"
+    data = request.POST if write else request.GET if "objects" in request.GET else None
+    if data is None:
+        data = {
+            "objects": list(obj.premises.values_list("id", flat=True)[:4]),
+            "creation_key": str(uuid.uuid4()),
+        }
+    elif not write:
+        data = data.copy()
+        data["creation_key"] = str(uuid.uuid4())
+    if not write:
+        data = data.copy()
+        data["comment"] = request.session.get(f"report-comment-{obj.pk}", "")
+    form = SelectionForm(data, request_obj=obj, minimum=1)
+    selected, rows, columns, preview = [], [], [], None
+    choices = report_parameter_choices(obj)
+    action = request.POST.get(
+        "action", "check" if request.path.endswith("/checks") else "preview"
+    )
+    valid = form.is_valid()
+    if write and valid:
+        request.session[f"report-comment-{obj.pk}"] = form.cleaned_data["comment"]
+        selected = list(form.cleaned_data["objects"].order_by("id"))
+        if action == "show":
+            return comparison_redirect(obj, selected, differences)
+        if not check_version(request, obj):
+            form.add_error(
+                None, "Профиль изменился. Обновите страницу перед действием."
+            )
+        elif action == "check":
+            try:
+                for p in selected:
+                    evaluate(p, request.user)
+                messages.success(request, "Проверка и расчёт сохранены.")
+                return comparison_redirect(obj, selected, differences)
+            except ValueError as exc:
+                form.add_error(None, str(exc))
+        elif action in ["parameter", "issue"] and str(
+            obj.selection_version
+        ) != request.POST.get("selection_version"):
+            form.add_error(
+                None, "Состав отчёта изменён в другой вкладке. Обновите страницу."
+            )
+        elif action == "parameter":
+            key = request.POST.get("parameter")
+            if key not in dict(choices):
+                form.add_error(None, "Параметр недоступен для этого запроса.")
+            else:
+                parameters = set(obj.report_parameters)
+                if key in parameters:
+                    parameters.remove(key)
+                else:
+                    parameters.add(key)
+                obj.report_parameters = sorted(parameters)
+                obj.selection_version += 1
+                obj.save(update_fields=["report_parameters", "selection_version"])
+                audit(request.user, "report.parameters.updated", obj.pk)
+                return comparison_redirect(obj, selected, differences)
+        elif action == "issue":
+            try:
+                if not form.cleaned_data["creation_key"]:
+                    raise ValueError("Обновите форму: отсутствует ключ отправки.")
+                report = issue_report(
+                    obj,
+                    selected,
+                    form.cleaned_data["comment"],
+                    request.user,
+                    form.cleaned_data["creation_key"],
+                    parameters=obj.report_parameters,
+                )
+                messages.success(
+                    request, f"Клиентская версия {report.version} сохранена."
+                )
+                return comparison_redirect(
+                    obj, selected, differences, "report-versions"
+                )
+            except ValueError as exc:
+                form.add_error(None, str(exc))
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).error(
+                    "Report generation failed: %s", type(exc).__name__
+                )
+                form.add_error(
+                    None,
+                    "Не удалось сформировать отчёт. Ввод сохранён на экране; старые версии доступны ниже.",
+                )
+    if valid:
+        selected = list(form.cleaned_data["objects"].order_by("id"))
+        rows = compare_rows(selected, differences)
+        for row in rows:
+            criterion = next(
+                (r for r in obj.requirements.all() if str(r) == row["name"]), None
+            )
+            row["key"] = f"requirement:{criterion.pk}" if criterion else ""
+            row["mandatory"] = criterion and criterion.priority == "required"
+            row["included"] = row["mandatory"] or row["key"] in obj.report_parameters
+        columns = [
+            {
+                "p": p,
+                "ev": current_evaluation(p),
+                "e": economics(p),
+                "comparison_rows": [
+                    {"name": r["name"], "cell": r["cells"][i]} for r in rows
+                ],
+            }
+            for i, p in enumerate(selected)
+        ]
+        try:
+            preview = report_snapshot(
+                obj,
+                selected,
+                form.cleaned_data["comment"],
+                parameters=obj.report_parameters,
+            )
+        except ValueError:
+            pass  # Stale cards remain visible with a clear recalculate action.
+    return render(
+        request,
+        "compare.html",
+        {
+            **tabs_context(request, obj, "compare"),
+            "form": form,
+            "selected": selected,
+            "rows": rows,
+            "columns": columns,
+            "differences": differences,
+            "preview": preview,
+            "parameter_choices": [
+                {"key": key, "label": label, "included": key in obj.report_parameters}
+                for key, label in choices
+            ],
+            "versions": obj.reports.defer("pdf", "snapshot").order_by("-version"),
+        },
+    )
+
+
+def comparison_redirect(obj, selected, differences=False, anchor=""):
+    from urllib.parse import urlencode
+
+    url = (
+        reverse("compare", args=[obj.pk])
+        + "?"
+        + urlencode(
+            [("objects", p.pk) for p in selected]
+            + ([("differences", "1")] if differences else [])
+        )
+    )
+    return redirect(url + ("#" + anchor if anchor else ""))
+
+
+@workspace
+@transaction.atomic
 def checks(request, pk):
     obj = load_request(
         request, pk, write=request.method == "POST", lock=request.method == "POST"
@@ -455,7 +621,7 @@ def checks(request, pk):
     if request.method == "POST":
         if not check_version(request, obj):
             messages.error(request, "Профиль изменился. Обновите страницу.")
-            return redirect("checks", pk=pk)
+            return redirect("compare", pk=pk)
         ids = request.POST.getlist("objects")
         try:
             selected = (
@@ -470,127 +636,24 @@ def checks(request, pk):
         try:
             for p in selected:
                 evaluate(p, request.user)
-            messages.success(
-                request,
-                "Проверка и расчёт сохранены."
-                if selected
-                else "Добавьте хотя бы одно помещение.",
-            )
-        except ValueError as e:
-            messages.error(request, str(e))
-        return redirect("checks", pk=pk)
-    cards = [
-        {"p": p, "ev": current_evaluation(p)} for p in obj.premises.all().order_by("id")
-    ]
-    return render(
-        request, "checks.html", {**tabs_context(request, obj, "checks"), "cards": cards}
-    )
-
-
-@workspace
-@require_GET
-def compare(request, pk):
-    obj = load_request(request, pk)
-    form = SelectionForm(
-        request.GET if "objects" in request.GET else None,
-        request_obj=obj,
-        minimum=2,
-        initial={"objects": list(obj.premises.values_list("id", flat=True)[:4])},
-    )
-    selected = []
-    rows = []
-    columns = []
-    differences = request.GET.get("differences") == "1"
-    if form.is_bound and form.is_valid():
-        selected = list(form.cleaned_data["objects"].order_by("id"))
-        rows = compare_rows(selected, differences)
-        columns = [
-            {
-                "p": p,
-                "ev": current_evaluation(p),
-                "e": economics(p),
-                "comparison_rows": [
-                    {"name": r["name"], "cell": r["cells"][i]} for r in rows
-                ],
-            }
-            for i, p in enumerate(selected)
-        ]
-        audit(request.user, "compare.opened", obj.pk)
-    return render(
-        request,
-        "compare.html",
-        {
-            **tabs_context(request, obj, "compare"),
-            "form": form,
-            "selected": selected,
-            "rows": rows,
-            "columns": columns,
-            "differences": differences,
-            "selected_query": "&".join("objects=" + str(p.pk) for p in selected),
-        },
-    )
+            messages.success(request, "Проверка и расчёт сохранены.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        return comparison_redirect(obj, selected[:4])
+    return redirect("compare", pk=pk)
 
 
 @workspace
 def reports(request, pk):
-    obj = load_request(request, pk, write=request.method == "POST")
-    data = (
-        request.POST
-        if request.method == "POST"
-        else request.GET
-        if "objects" in request.GET
-        else None
-    )
-    if request.method == "GET" and data is not None:
-        data = data.copy()
-        data["creation_key"] = str(uuid.uuid4())
-    form = SelectionForm(
-        data,
-        request_obj=obj,
-        initial={"objects": list(obj.premises.values_list("id", flat=True)[:4])},
-    )
-    preview = None
-    if data is not None and form.is_valid():
-        selected = list(form.cleaned_data["objects"].order_by("id"))
-        try:
-            preview = report_snapshot(obj, selected, form.cleaned_data["comment"])
-            if request.method == "POST" and not form.cleaned_data["creation_key"]:
-                raise ValueError("Обновите форму: отсутствует ключ отправки.")
-            if request.method == "POST" and request.POST.get("action") == "issue":
-                report = issue_report(
-                    obj,
-                    selected,
-                    form.cleaned_data["comment"],
-                    request.user,
-                    form.cleaned_data["creation_key"],
-                )
-                messages.success(
-                    request, f"Клиентская версия {report.version} сохранена."
-                )
-                return redirect("reports", pk=pk)
-        except ValueError as e:
-            form.add_error(None, str(e))
-        except Exception as exc:
-            import logging
+    load_request(request, pk, write=request.method == "POST")
+    if request.method == "POST":
+        return compare(request, pk)
+    from urllib.parse import urlencode
 
-            logging.getLogger(__name__).error(
-                "Report generation failed for request %s: %s",
-                obj.pk,
-                type(exc).__name__,
-            )
-            form.add_error(
-                None,
-                "Не удалось сохранить PDF. Введённые данные сохранены на экране; повторите отправку. Старые версии доступны ниже.",
-            )
-    return render(
-        request,
-        "reports.html",
-        {
-            **tabs_context(request, obj, "reports"),
-            "form": form,
-            "preview": preview,
-            "versions": obj.reports.defer("pdf", "snapshot").order_by("-version"),
-        },
+    return redirect(
+        reverse("compare", args=[pk])
+        + ("?" + urlencode(request.GET, doseq=True) if request.GET else "")
+        + "#report-builder"
     )
 
 
@@ -773,3 +836,127 @@ def healthz(request):
     except DatabaseError:
         return HttpResponse("unavailable", status=503, content_type="text/plain")
     return HttpResponse("ok", content_type="text/plain")
+
+
+@workspace
+@require_GET
+def all_premises(request):
+    qs = (
+        Premises.objects.filter(request__in=accessible(request))
+        .select_related("request", "request__owner")
+        .order_by("-updated_at")
+    )
+    search = request.GET.get("q", "").strip()
+    if search:
+        qs = qs.filter(Q(label__icontains=search) | Q(request__title__icontains=search))
+    cards = [
+        {"p": p, "ev": current_evaluation(p), "economics": economics(p)} for p in qs
+    ]
+    return render(
+        request,
+        "all_premises.html",
+        {"cards": cards, "search": search, "section": "all_premises"},
+    )
+
+
+@workspace
+def start_premises(request):
+    choices = (
+        accessible(request)
+        .filter(owner=request.user, archived=False)
+        .exclude(stage="done")
+        .order_by("-updated_at")
+    )
+
+    class StartForm(forms.Form):
+        request_id = forms.ModelChoiceField(
+            label="К какому запросу добавить помещение?", queryset=choices
+        )
+
+    form = StartForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        obj = load_request(request, form.cleaned_data["request_id"].pk, write=True)
+        return redirect("premises_new", pk=obj.pk)
+    return render(
+        request,
+        "start_premises.html",
+        {"form": form, "has_requests": choices.exists(), "section": "all_premises"},
+    )
+
+
+@login_required
+@require_GET
+def parser_preview(request):
+    m = getattr(request.user, "membership", None)
+    if not request.user.is_superuser and not (m and m.active and m.role == "manager"):
+        raise PermissionDenied
+    return render(request, "parser.html", {"section": "parser"})
+
+
+@workspace
+@transaction.atomic
+def refine(request, pk):
+    obj = load_request(
+        request, pk, write=request.method == "POST", lock=request.method == "POST"
+    )
+    form = RefinementForm(request.POST or None, request_obj=obj)
+    if request.method == "POST" and form.is_valid():
+        if not check_version(request, obj):
+            return conflict(
+                request,
+                "refine.html",
+                {**tabs_context(request, obj, "refine"), "form": form},
+                form,
+            )
+        d = form.cleaned_data
+        changed = obj.budget != d["budget"] or obj.geography != d["geography"]
+        obj.budget, obj.geography = d["budget"], d["geography"]
+        specs = []
+        if d.get("area_min") is not None or d.get("area_max") is not None:
+            lo, hi = d.get("area_min"), d.get("area_max")
+            specs.append(
+                dict(
+                    name="Площадь",
+                    unit="м²",
+                    operator="range"
+                    if lo is not None and hi is not None
+                    else "gte"
+                    if lo is not None
+                    else "lte",
+                    minimum=lo if lo is not None else hi,
+                    maximum=hi if lo is not None else None,
+                    priority=d["area_priority"],
+                )
+            )
+        if d.get("power") is not None:
+            specs.append(
+                dict(
+                    name="Мощность",
+                    unit="кВт",
+                    operator="gte",
+                    minimum=d["power"],
+                    priority=d["power_priority"],
+                )
+            )
+        for key, name in [("water", "Вода"), ("ventilation", "Отдельная вытяжка")]:
+            if d.get(key):
+                specs.append(
+                    dict(
+                        name=name,
+                        unit="",
+                        operator="eq",
+                        expected=True,
+                        priority="na" if d[key] == "na" else d[key + "_priority"],
+                    )
+                )
+        for spec in specs:
+            Requirement.objects.create(request=obj, **spec)
+            changed = True
+        if changed:
+            obj.version += 1
+            obj.save()
+            audit(request.user, "profile.refined", obj.pk)
+        return redirect("objects", pk=pk)
+    return render(
+        request, "refine.html", {**tabs_context(request, obj, "refine"), "form": form}
+    )

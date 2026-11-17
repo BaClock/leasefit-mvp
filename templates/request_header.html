@@ -4,19 +4,22 @@
   <div>
     <div class="eyebrow">{{ req.city }} · {{ req.business }}</div>
     <h1>{{ req.title }}</h1>
-    <p>{{ req.get_stage_display }}{% if req.archived %} · Архив{% endif %} · Профиль v{{ req.version }}{% if not is_owner %} · Просмотр запроса коллеги{% endif %}</p>
+    <p>{{ req.get_stage_display }}{% if req.archived %} · Архив{% endif %}
+    {% if not is_owner %}· Просмотр запроса коллеги{% endif %}</p>
   </div>
-  <div class="pill {% if req.ready %}pass{% else %}neutral{% endif %}">{% if req.ready %}✓ Профиль готов к проверке{% else %}○ Задайте обязательное условие{% endif %}</div>
+  <span class="pill {% if req.ready %}pass{% else %}neutral{% endif %}">{% if req.ready %}✓ Есть обязательные требования{% else %}○ Задайте обязательное условие{% endif %}</span>
 </div>
-<nav class="tabs" aria-label="Разделы запроса">
-  <a class="{% if section == 'profile' %}active{% endif %}"
-     href="{% url 'profile' req.pk %}">01 Профиль</a>
-  <a class="{% if section == 'objects' %}active{% endif %}"
-     href="{% url 'objects' req.pk %}">02 Помещения</a>
-  <a class="{% if section == 'checks' %}active{% endif %}"
-     href="{% url 'checks' req.pk %}">03 Проверка</a>
-  <a class="{% if section == 'compare' %}active{% endif %}"
-     href="{% url 'compare' req.pk %}">04 Сравнение</a>
-  <a class="{% if section == 'reports' %}active{% endif %}"
-     href="{% url 'reports' req.pk %}">05 Отчёты</a>
-</nav>
+<ol class="workflow-steps" aria-label="Этапы работы">
+  <li {% if section == 'profile' %}aria-current="step"{% endif %}>
+    <span>1</span> Профиль
+  </li>
+  <li {% if section == 'refine' %}aria-current="step"{% endif %}>
+    <span>2</span> Уточнения
+  </li>
+  <li {% if section == 'objects' %}aria-current="step"{% endif %}>
+    <span>3</span> Помещения
+  </li>
+  <li {% if section == 'compare' %}aria-current="step"{% endif %}>
+    <span>4</span> Проверка и сравнение
+  </li>
+</ol>

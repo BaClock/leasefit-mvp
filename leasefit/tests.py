@@ -275,9 +275,9 @@ class AcceptanceTests(TestCase):
             "Учебный объект А",
             "Условный акт",
             "Клиентский комментарий",
-            "73000",
-            "170000",
-            "3000",
+            "73 000",
+            "170 000",
+            "Превышение 3 000",
         ]:
             self.assertIn(s, text)
         for s in [
@@ -357,14 +357,16 @@ class AcceptanceTests(TestCase):
         self.client.force_login(self.manager)
         for suffix in ["profile", "objects", "checks", "compare", "reports"]:
             self.assertEqual(
-                self.client.get(f"/app/requests/{self.req.pk}/{suffix}").status_code,
+                self.client.get(
+                    f"/app/requests/{self.req.pk}/{suffix}", follow=True
+                ).status_code,
                 200,
             )
             self.assertEqual(
                 self.client.post(
                     f"/app/requests/{self.req.pk}/{suffix}", {}
                 ).status_code,
-                405 if suffix in ["objects", "compare"] else 403,
+                405 if suffix == "objects" else 403,
             )
         self.assertEqual(
             self.client.post(
@@ -675,6 +677,8 @@ class AcceptanceTests(TestCase):
             "comment": "Учебный подбор",
             "creation_key": uuid.uuid4(),
             "action": "preview",
+            "version": req.version,
+            "selection_version": req.selection_version,
         }
         url = f"/app/requests/{req.pk}/reports"
         self.assertContains(c.post(url, report_form), "ПРЕДПРОСМОТР КЛИЕНТСКОЙ ВЕРСИИ")
@@ -686,6 +690,224 @@ class AcceptanceTests(TestCase):
         response = c.get(f"/app/reports/{report.pk}/download")
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF-"))
+
+    def test_next_without_profile_edits_keeps_evaluation_current(self):
+        self.observe()
+        self.result()
+        d = {
+            "title": self.req.title,
+            "city": self.req.city,
+            "business": self.req.business,
+            "budget": "70000",
+            "start_budget": "180000",
+            "version": 1,
+            "creation_key": self.req.creation_key,
+            "requirements-TOTAL_FORMS": 1,
+            "requirements-INITIAL_FORMS": 1,
+            "requirements-0-id": self.power.pk,
+            "requirements-0-name": "Мощность",
+            "requirements-0-unit": "кВт",
+            "requirements-0-operator": "gte",
+            "requirements-0-minimum": "15.00",
+            "requirements-0-expected": "on",
+            "requirements-0-priority": "required",
+        }
+        self.assertRedirects(
+            self.client.post(f"/app/requests/{self.req.pk}/profile", d),
+            f"/app/requests/{self.req.pk}/refine",
+        )
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.version, 1)
+        self.assertIsNotNone(current_evaluation(self.p))
+
+    def test_sidebar_contains_premises_and_no_workflow_tabs(self):
+        response = self.client.get(f"/app/requests/{self.req.pk}/profile")
+        self.assertContains(response, 'aria-label="Помещения"')
+        self.assertNotContains(response, 'class="tabs"')
+        self.assertNotContains(response, "05 Отчёты")
+        self.assertContains(response, "Далее: уточнить профиль")
+
+    def test_all_premises_respects_agency_and_owner(self):
+        req = ClientRequest.objects.create(
+            agency=self.agency, owner=self.colleague, title="Коллега"
+        )
+        Premises.objects.create(request=req, label="Вариант коллеги")
+        foreign = ClientRequest.objects.create(
+            agency=self.other_agency, owner=self.outsider, title="Другое агентство"
+        )
+        Premises.objects.create(request=foreign, label="Закрытый чужой вариант")
+        response = self.client.get("/app/premises")
+        self.assertContains(response, self.p.label)
+        self.assertNotContains(response, "Вариант коллеги")
+        self.client.force_login(self.manager)
+        response = self.client.get("/app/premises")
+        self.assertContains(response, "Вариант коллеги")
+        self.assertNotContains(response, "Закрытый чужой вариант")
+        self.assertEqual(
+            self.client.post("/app/premises/new", {"request_id": req.pk}).status_code,
+            200,
+        )
+        self.client.force_login(self.owner)
+        self.assertRedirects(
+            self.client.post("/app/premises/new", {"request_id": self.req.pk}),
+            f"/app/requests/{self.req.pk}/objects/new",
+        )
+
+    def test_refinement_only_asks_missing_conditions_and_saves(self):
+        response = self.client.get(f"/app/requests/{self.req.pk}/refine")
+        self.assertNotContains(response, 'id="id_power"')
+        self.assertContains(response, 'id="id_area_min"')
+        data = {
+            "version": 1,
+            "budget": "65000",
+            "geography": "Левый берег",
+            "area_min": "50",
+            "area_max": "80",
+            "area_priority": "required",
+            "water": "yes",
+            "water_priority": "required",
+            "ventilation": "na",
+            "ventilation_priority": "desired",
+        }
+        self.assertRedirects(
+            self.client.post(f"/app/requests/{self.req.pk}/refine", data),
+            f"/app/requests/{self.req.pk}/objects",
+        )
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.version, 2)
+        self.assertEqual(self.req.budget, 65000)
+        self.assertEqual(self.req.requirements.get(name="Площадь").operator, "range")
+        self.assertEqual(
+            self.req.requirements.get(name="Отдельная вытяжка").priority, "na"
+        )
+        count = self.req.requirements.count()
+        self.assertEqual(
+            self.client.post(f"/app/requests/{self.req.pk}/refine", data).status_code,
+            409,
+        )
+        self.assertEqual(self.req.requirements.count(), count)
+
+    def test_refinement_unknown_does_not_create_fake_conditions(self):
+        self.client.post(
+            f"/app/requests/{self.req.pk}/refine",
+            {
+                "version": 1,
+                "budget": 70000,
+                "area_priority": "desired",
+                "water_priority": "desired",
+                "ventilation_priority": "desired",
+            },
+        )
+        self.assertEqual(self.req.requirements.count(), 1)
+        self.assertFalse(self.req.requirements.filter(name="Вода").exists())
+
+    def test_combined_page_read_only_manager_and_legacy_redirects(self):
+        self.observe()
+        self.result()
+        for suffix in ["checks", "reports"]:
+            response = self.client.get(f"/app/requests/{self.req.pk}/{suffix}")
+            self.assertEqual(response.status_code, 302)
+            self.assertIn("/compare", response.url)
+        self.client.force_login(self.manager)
+        self.assertEqual(
+            self.client.post(
+                f"/app/requests/{self.req.pk}/compare",
+                {"action": "show", "objects": [self.p.pk]},
+            ).status_code,
+            302,
+        )
+        for action in ["check", "parameter", "issue"]:
+            self.assertEqual(
+                self.client.post(
+                    f"/app/requests/{self.req.pk}/compare",
+                    {"action": action, "objects": [self.p.pk]},
+                ).status_code,
+                403,
+            )
+
+    def test_optional_parameters_persist_and_change_report_snapshot(self):
+        desired = Requirement.objects.create(
+            request=self.req, name="Второй вход", operator="eq", priority="desired"
+        )
+        self.observe()
+        self.result()
+        old = self.issue()
+        original = bytes(old.pdf)
+        url = f"/app/requests/{self.req.pk}/compare"
+        data = {
+            "version": 1,
+            "selection_version": 1,
+            "objects": [self.p.pk],
+            "action": "parameter",
+            "parameter": f"requirement:{desired.pk}",
+            "comment": "Не терять комментарий",
+        }
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.selection_version, 2)
+        self.assertEqual(self.req.version, 1)
+        self.assertIn(f"requirement:{desired.pk}", self.req.report_parameters)
+        self.assertIsNotNone(current_evaluation(self.p))
+        snapshot = report_snapshot(self.req, [self.p], "", parameters=[])
+        self.assertEqual(len(snapshot["objects"][0]["rows"]), 1)
+        snapshot = report_snapshot(
+            self.req, [self.p], "", parameters=self.req.report_parameters
+        )
+        self.assertEqual(len(snapshot["objects"][0]["rows"]), 2)
+        self.assertContains(self.client.get(url), "Не терять комментарий")
+        # A stale toggle does not undo the newer composition.
+        self.assertContains(self.client.post(url, data), "Состав отчёта изменён")
+        old.refresh_from_db()
+        self.assertEqual(bytes(old.pdf), original)
+        data.update(selection_version=2, parameter="requirement:99999")
+        self.assertContains(self.client.post(url, data), "Параметр недоступен")
+
+    def test_pdf_required_risks_cannot_be_removed_and_landscape_layout(self):
+        self.observe(value=12)
+        self.result()
+        snapshot = report_snapshot(self.req, [self.p], "", parameters=[])
+        snapshot.update(
+            version=1,
+            issued_at=timezone.localtime().isoformat(),
+            author="Тест",
+            agency=self.agency.name,
+        )
+        from .pdf import render_pdf
+
+        reader = PdfReader(BytesIO(render_pdf(snapshot)))
+        self.assertGreater(
+            reader.pages[0].mediabox.width, reader.pages[0].mediabox.height
+        )
+        text = "".join(p.extract_text() for p in reader.pages)
+        for phrase in [
+            "Блокер",
+            "Отсеян при текущих условиях",
+            "Превышение 3 000",
+            "Условный акт",
+            "Источники",
+            "Допущения",
+        ]:
+            self.assertIn(phrase, text)
+        self.assertNotIn("Ежемесячные платежи", text)
+        self.assertNotIn("SECRET_INTERNAL_NOTE", text)
+
+    def test_parser_only_managers_or_superuser_without_fetching(self):
+        self.assertEqual(self.client.get("/app/parser").status_code, 403)
+        self.assertNotContains(self.client.get("/app/premises"), "Парсинг объявлений")
+        self.client.force_login(self.manager)
+        self.assertContains(
+            self.client.get("/app/parser"),
+            "загрузка страниц и извлечение данных не выполняются",
+        )
+        self.assertContains(self.client.get("/app/premises"), "Парсинг объявлений")
+        self.manager.membership.active = False
+        self.manager.membership.save()
+        self.assertEqual(self.client.get("/app/parser").status_code, 403)
+        operator = User.objects.create_superuser(
+            "operator", password="Operator-only-test-password-753!"
+        )
+        self.client.force_login(operator)
+        self.assertEqual(self.client.get("/app/parser").status_code, 200)
 
 
 from concurrent.futures import ThreadPoolExecutor

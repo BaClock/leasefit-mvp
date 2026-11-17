@@ -56,3 +56,11 @@ document.addEventListener("DOMContentLoaded", () => {
     input?.focus();
   }
 });
+
+// Parameter buttons submit through the regular CSRF-protected server form.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-parameter]");
+  if (button)
+    document.getElementById("report-parameter").value =
+      button.dataset.parameter;
+});
