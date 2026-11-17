@@ -18,6 +18,7 @@ from django.core.exceptions import PermissionDenied
 from .models import *
 from .forms import *
 from .services import *
+from .characteristics import GROUPS, STANDARD, resolve_characteristic
 
 
 def workspace(fn):
@@ -126,8 +127,21 @@ def profile(request, pk=None):
         else ClientRequest(owner=request.user, agency=request.member.agency)
     )
     form = RequestForm(request.POST or None, instance=obj)
-    formset = RequirementsFormSet(
-        request.POST or None, instance=obj, prefix="requirements"
+    grouped = GroupedRequirementsForm(request.POST or None, request_obj=obj)
+    custom_qs = (
+        obj.requirements.filter(
+            Q(characteristic__agency__isnull=False)
+            | Q(characteristic__code__in=grouped.ambiguous_codes)
+        )
+        if obj.pk
+        else Requirement.objects.none()
+    )
+    formset = CustomRequirementsFormSet(
+        request.POST or None,
+        instance=obj,
+        prefix="custom",
+        queryset=custom_qs,
+        form_kwargs={"agency": request.member.agency},
     )
     if request.method == "POST":
         # Duplicate create is safe even if the original form has since changed.
@@ -143,11 +157,12 @@ def profile(request, pk=None):
             )
             if existing:
                 return redirect("refine", pk=existing.pk)
-        valid = form.is_valid() and formset.is_valid()
+        valid = form.is_valid() & grouped.is_valid() & formset.is_valid()
         ctx = {
             **tabs_context(request, obj, "profile"),
             "form": form,
             "formset": formset,
+            "grouped": grouped,
             "new": not pk,
         }
         if pk and not check_version(request, obj):
@@ -156,9 +171,12 @@ def profile(request, pk=None):
             obj = form.save(commit=False)
             if not pk:
                 obj.creation_key = form.cleaned_data["creation_key"]
-            if pk and (form.has_changed() or formset.has_changed()):
+            if pk and (
+                form.has_changed() or grouped.has_changed() or formset.has_changed()
+            ):
                 obj.version += 1
             obj.save()
+            grouped.save(obj)
             formset.instance = obj
             formset.save()
             audit(request.user, "profile.updated" if pk else "request.created", obj.pk)
@@ -176,6 +194,7 @@ def profile(request, pk=None):
             **tabs_context(request, obj, "profile"),
             "form": form,
             "formset": formset,
+            "grouped": grouped,
             "new": not pk,
         },
     )
@@ -213,7 +232,9 @@ def objects(request, pk):
     obj = load_request(request, pk)
     cards = []
     for p in obj.premises.all().order_by("id"):
-        cards.append({"p": p, "ev": current_evaluation(p), "economics": economics(p)})
+        cards.append(
+            {"p": p, "ev": current_evaluation(p, obj), "economics": economics(p, obj)}
+        )
     return render(
         request,
         "objects.html",
@@ -221,59 +242,216 @@ def objects(request, pk):
     )
 
 
-@workspace
-@transaction.atomic
-def premises_edit(request, pk, object_id=None):
-    obj = load_request(
-        request, pk, write=request.method == "POST", lock=request.method == "POST"
-    )
+def catalog_scope(request):
+    return Premises.objects.filter(agency=request.member.agency)
+
+
+def available_files(request, p):
+    return p.attachments.filter(
+        Q(origin_request__isnull=True) | Q(origin_request__in=accessible(request))
+    ).order_by("id")
+
+
+def property_load(request, pk, object_id, write=False, lock=False):
+    req = load_request(request, pk, write=write, lock=lock) if pk is not None else None
+    qs = catalog_scope(request)
+    if req is not None:
+        qs = qs.filter(requests=req)
+    if lock:
+        qs = qs.select_for_update()
     p = (
-        get_object_or_404(obj.premises, pk=object_id)
-        if object_id
-        else Premises(request=obj)
+        get_object_or_404(qs, pk=object_id)
+        if object_id is not None
+        else Premises(agency=request.member.agency)
     )
-    form = PremisesForm(request.POST or None, instance=p)
-    obsform = ObservationForm(initial={"observed_on": timezone.localdate()})
+    return req, p
+
+
+def property_redirect(req, p):
+    return (
+        redirect("premises", pk=req.pk, object_id=p.pk)
+        if req is not None
+        else redirect("catalog_premises", object_id=p.pk)
+    )
+
+
+def property_page(
+    request,
+    req,
+    p,
+    form=None,
+    obsform=None,
+    uploadform=None,
+    customform=None,
+    context_form=None,
+    status=200,
+):
+    if form is None:
+        form = PremisesForm(instance=p)
+    shared = p.pk and p.request_links.count() > 1
+    if shared:
+        form.fields["confirm_shared"] = forms.BooleanField(
+            label="Я понимаю: общие изменения затронут все связанные запросы.",
+            required=True,
+        )
+    files = available_files(request, p) if p.pk else Attachment.objects.none()
+    if obsform is None:
+        initial = {"observed_on": timezone.localdate()}
+        code = request.GET.get("characteristic")
+        choice = (
+            Characteristic.objects.filter(
+                Q(agency__isnull=True) | Q(agency=request.member.agency), code=code
+            ).first()
+            if code
+            else None
+        )
+        if choice:
+            initial["characteristic"] = choice.pk
+        obsform = ObservationForm(
+            agency=request.member.agency,
+            premises=p,
+            visible_files=files,
+            initial=initial,
+        )
+    if shared:
+        obsform.fields["confirm_shared"] = forms.BooleanField(
+            label="Уточнение общей характеристики изменит оценки во всех связанных запросах.",
+            required=True,
+        )
+    groups = []
+    observations = (
+        list(p.observations.select_related("characteristic").order_by("id"))
+        if p.pk
+        else []
+    )
+    for key, title in [*GROUPS, ("custom", "Дополнительные характеристики")]:
+        entries = []
+        for c in Characteristic.objects.filter(
+            Q(agency__isnull=True) | Q(agency=request.member.agency), group=key
+        ).order_by("id"):
+            records = [o for o in observations if o.characteristic_id == c.pk]
+            live = [o for o in records if not o.superseded]
+            latest = live[-1] if live else None
+            entries.append(
+                {
+                    "characteristic": c,
+                    "primary": c.group == "custom"
+                    or any(d["code"] == c.code and d["primary"] for d in STANDARD),
+                    "records": records,
+                    "latest": latest,
+                    "conflict": len(
+                        {
+                            (o.value, o.boolean, o.text, o.unit)
+                            for o in live
+                            if o.status != "unknown"
+                        }
+                    )
+                    > 1,
+                }
+            )
+        if entries:
+            groups.append(
+                {
+                    "title": title,
+                    "entries": entries,
+                    "has_advanced": any(not e["primary"] for e in entries),
+                }
+            )
     ctx = {
-        **tabs_context(request, obj, "objects"),
+        **(
+            tabs_context(request, req, "objects")
+            if req
+            else {"section": "all_premises", "can_edit": True}
+        ),
         "p": p,
         "form": form,
         "obsform": obsform,
-        "uploadform": AttachmentForm(),
-        "new_object": not object_id,
+        "uploadform": uploadform or AttachmentForm(),
+        "customform": customform or CharacteristicForm(),
+        "groups": groups,
+        "files": files,
+        "new_object": not p.pk,
+        "shared": shared,
+        "use_count": p.request_links.count() if p.pk else 0,
     }
+    ctx["visible_requests"] = (
+        accessible(request).filter(premises=p).distinct()
+        if p.pk
+        else ClientRequest.objects.none()
+    )
+    if req and p.pk:
+        link = get_object_or_404(RequestPremises, request=req, premises=p)
+        ctx.update(
+            context_form=context_form or ContextForm(instance=link),
+            ev=current_evaluation(p, req),
+            economics=economics(p, req),
+        )
+    else:
+        ctx["economics"] = economics(p)
+    return render(request, "premises.html", ctx, status=status)
+
+
+@workspace
+@transaction.atomic
+def premises_edit(request, pk=None, object_id=None):
+    req, p = property_load(
+        request,
+        pk,
+        object_id,
+        write=request.method == "POST",
+        lock=request.method == "POST",
+    )
+    form = PremisesForm(request.POST or None, instance=p)
+    if p.pk and p.request_links.count() > 1:
+        form.fields["confirm_shared"] = forms.BooleanField(
+            label="Изменения затронут все связанные запросы. Подтверждаю сохранение.",
+            required=True,
+        )
     if request.method == "POST":
         if not object_id:
             try:
                 key = uuid.UUID(request.POST.get("creation_key", ""))
             except (ValueError, TypeError, AttributeError):
                 key = None
-            existing = obj.premises.filter(creation_key=key).first() if key else None
-            if existing:
-                return redirect("premises", pk=pk, object_id=existing.pk)
+            previous = (
+                catalog_scope(request).filter(creation_key=key).first() if key else None
+            )
+            if previous:
+                if req:
+                    RequestPremises.objects.get_or_create(
+                        request=req, premises=previous
+                    )
+                return property_redirect(req, previous)
         valid = form.is_valid()
         if object_id and not check_version(request, p):
-            return conflict(request, "premises.html", ctx, form)
+            form.add_error(
+                None,
+                "Карточка изменилась в другой вкладке. Сопоставьте актуальные сведения.",
+            )
+            return property_page(request, req, p, form=form, status=409)
         if valid:
             p = form.save(commit=False)
-            if not object_id:
-                p.creation_key = form.cleaned_data["creation_key"]
+            p.agency = request.member.agency
             if object_id:
                 p.version += 1
+            else:
+                p.creation_key = form.cleaned_data["creation_key"]
             p.save()
-            duplicate = (
-                obj.premises.filter(
+            if req:
+                RequestPremises.objects.get_or_create(request=req, premises=p)
+            if (
+                catalog_scope(request)
+                .filter(
                     label__iexact=p.label,
                     floor__iexact=p.floor,
                     number__iexact=p.number,
                 )
                 .exclude(pk=p.pk)
                 .exists()
-            )
-            if duplicate:
+            ):
                 messages.warning(
                     request,
-                    "Возможный дубль: адрес / метка, этаж и номер совпадают с другой карточкой. Записи сохранены раздельно.",
+                    "Возможно, такая карточка уже есть в каталоге. Записи не объединяются автоматически.",
                 )
             audit(
                 request.user,
@@ -282,59 +460,37 @@ def premises_edit(request, pk, object_id=None):
             )
             messages.success(
                 request,
-                "Карточка сохранена. Добавьте сведения с источниками и запустите проверку.",
+                "Общая карточка сохранена. Связанные оценки потребуют пересчёта.",
             )
-            if request.POST.get("action") == "next":
-                return redirect("compare", pk=pk)
-            return redirect("premises", pk=pk, object_id=p.pk)
-    if p.pk:
-        ctx.update(
-            observations=p.observations.order_by("name", "id"),
-            ev=current_evaluation(p),
-            files=p.attachments.all(),
-            economics=economics(p),
-        )
-    return render(request, "premises.html", ctx)
-
-
-def detail_with_errors(request, obj, p, obsform=None, uploadform=None, status=400):
-    return render(
-        request,
-        "premises.html",
-        {
-            **tabs_context(request, obj, "objects"),
-            "p": p,
-            "form": PremisesForm(instance=p),
-            "obsform": obsform
-            or ObservationForm(initial={"observed_on": timezone.localdate()}),
-            "uploadform": uploadform or AttachmentForm(),
-            "observations": p.observations.order_by("name", "id"),
-            "files": p.attachments.all(),
-            "ev": current_evaluation(p),
-            "economics": economics(p),
-        },
-        status=status,
-    )
+            return property_redirect(req, p)
+    return property_page(request, req, p, form=form)
 
 
 @workspace
 @require_POST
 @transaction.atomic
-def add_observation(request, pk, object_id):
-    obj = load_request(request, pk, write=True, lock=True)
-    p = get_object_or_404(obj.premises, pk=object_id)
-    form = ObservationForm(request.POST)
+def add_observation(request, object_id, pk=None):
+    req, p = property_load(request, pk, object_id, write=True, lock=True)
+    form = ObservationForm(
+        request.POST,
+        agency=request.member.agency,
+        premises=p,
+        visible_files=available_files(request, p),
+    )
+    if p.request_links.count() > 1:
+        form.fields["confirm_shared"] = forms.BooleanField(
+            label="Подтверждаю изменение общей характеристики.", required=True
+        )
     if form.is_valid():
-        existing = p.observations.filter(
+        if p.observations.filter(
             creation_key=form.cleaned_data["creation_key"]
-        ).first()
-        if existing:
-            return redirect("premises", pk=pk, object_id=object_id)
+        ).exists():
+            return property_redirect(req, p)
         if not check_version(request, p):
             form.add_error(
-                None, "Карточка изменилась. Обновите её перед добавлением сведений."
+                None, "Карточка изменилась. Обновите сведения перед добавлением."
             )
-            return detail_with_errors(request, obj, p, obsform=form, status=409)
+            return property_page(request, req, p, obsform=form, status=409)
         o = form.save(commit=False)
         o.premises = p
         o.author = request.user
@@ -345,23 +501,27 @@ def add_observation(request, pk, object_id):
         audit(request.user, "observation.added", o.pk)
         messages.success(
             request,
-            "Сведения сохранены. Если источники расходятся, выберите актуальный ниже и объясните выбор.",
+            "Сведения сохранены. При расхождении источников выберите актуальный с основанием.",
         )
-        return redirect("premises", pk=pk, object_id=object_id)
-    return detail_with_errors(request, obj, p, obsform=form)
+        return property_redirect(req, p)
+    return property_page(request, req, p, obsform=form, status=400)
 
 
 @workspace
 @require_POST
 @transaction.atomic
-def resolve(request, pk, object_id, observation_id):
-    obj = load_request(request, pk, write=True, lock=True)
-    p = get_object_or_404(obj.premises, pk=object_id)
+def resolve(request, object_id, observation_id, pk=None):
+    req, p = property_load(request, pk, object_id, write=True, lock=True)
     o = get_object_or_404(p.observations, pk=observation_id)
+    if p.request_links.count() > 1 and not request.POST.get("confirm_shared"):
+        messages.error(
+            request, "Подтвердите изменение общей карточки для нескольких запросов."
+        )
+        return property_redirect(req, p)
     reason = request.POST.get("reason", "").strip()
     if not check_version(request, p):
         messages.error(request, "Карточка изменилась. Обновите страницу.")
-        return redirect("premises", pk=pk, object_id=object_id)
+        return property_redirect(req, p)
     if (
         not reason
         or len(reason) > 700
@@ -372,12 +532,12 @@ def resolve(request, pk, object_id, observation_id):
     ):
         messages.error(
             request,
-            "Нужны значение для помещения, актуальный документ / ответ и основание выбора (до 700 знаков). Архив и объявление не подтверждают текущее значение.",
+            "Нужны актуальное значение помещения, документ / ответ и основание выбора.",
         )
     else:
-        p.observations.filter(name__iexact=o.name).exclude(pk=o.pk).update(
-            superseded=True
-        )
+        p.observations.filter(characteristic_id=o.characteristic_id).exclude(
+            pk=o.pk
+        ).update(superseded=True)
         o.status = "confirmed"
         o.confirmation = reason
         o.save()
@@ -386,28 +546,37 @@ def resolve(request, pk, object_id, observation_id):
         audit(request.user, "conflict.resolved", o.pk)
         messages.success(
             request,
-            "Выбран актуальный источник. История сохранена. Пересчитайте оценку.",
+            "Источник выбран. История сохранена; пересчитайте связанные оценки.",
         )
-    return redirect("premises", pk=pk, object_id=object_id)
+    return property_redirect(req, p)
 
 
 @workspace
 @require_POST
 @transaction.atomic
-def upload(request, pk, object_id):
-    obj = load_request(request, pk, write=True, lock=True)
-    p = get_object_or_404(obj.premises, pk=object_id)
+def upload(request, object_id, pk=None):
+    req, p = property_load(request, pk, object_id, write=True, lock=True)
     form = AttachmentForm(request.POST, request.FILES)
     if form.is_valid():
         if not check_version(request, p):
             form.add_error(
                 None, "Карточка изменилась. Обновите страницу и выберите файл заново."
             )
-            return detail_with_errors(request, obj, p, uploadform=form, status=409)
+            return property_page(request, req, p, uploadform=form, status=409)
         f = form.cleaned_data["file"]
         data = f.read()
         digest = hashlib.sha256(data).hexdigest()
-        attachment, created = Attachment.objects.get_or_create(
+        old = p.attachments.filter(sha256=digest).first()
+        if (
+            old
+            and old.origin_request_id
+            and not accessible(request).filter(pk=old.origin_request_id).exists()
+        ):
+            form.add_error(
+                None, "Файл нельзя добавить в этот раздел. Выберите другой исходник."
+            )
+            return property_page(request, req, p, uploadform=form, status=400)
+        f, created = Attachment.objects.get_or_create(
             premises=p,
             sha256=digest,
             defaults={
@@ -418,24 +587,64 @@ def upload(request, pk, object_id):
             },
         )
         if created:
-            audit(request.user, "attachment.uploaded", attachment.pk)
+            audit(request.user, "attachment.uploaded", f.pk)
         messages.success(
             request,
-            "Файл сохранён в закрытом хранилище."
-            if created
-            else "Этот файл уже есть в карточке.",
+            "Технический документ сохранён для сотрудников агентства; в PDF исходник не включается.",
         )
+        return property_redirect(req, p)
+    return property_page(request, req, p, uploadform=form, status=400)
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def custom_characteristic(request, object_id):
+    _, p = property_load(request, None, object_id, write=True, lock=True)
+    form = CharacteristicForm(request.POST)
+    if form.is_valid():
+        c = resolve_characteristic(
+            request.member.agency_id,
+            form.cleaned_data["name"],
+            form.cleaned_data["unit"],
+            form.cleaned_data["kind"],
+        )
+        return redirect(
+            reverse("catalog_premises", args=[p.pk])
+            + "?characteristic="
+            + c.code
+            + "#evidence-form"
+        )
+    return property_page(request, None, p, customform=form, status=400)
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def request_context(request, pk, object_id):
+    req = load_request(request, pk, write=True, lock=True)
+    link = get_object_or_404(RequestPremises, request=req, premises_id=object_id)
+    form = ContextForm(request.POST, instance=link)
+    if form.is_valid():
+        if not check_version(request, link):
+            messages.error(request, "Условия запроса изменились. Обновите страницу.")
+            return redirect("premises", pk=pk, object_id=object_id)
+        if form.has_changed():
+            link = form.save(commit=False)
+            link.version += 1
+            link.save()
+            audit(request.user, "request.premises_context.updated", link.pk)
         return redirect("premises", pk=pk, object_id=object_id)
-    return detail_with_errors(request, obj, p, uploadform=form)
+    return property_page(request, req, link.premises, context_form=form, status=400)
 
 
 @workspace
 @require_GET
 def attachment_download(request, file_id):
-    f = get_object_or_404(
-        Attachment.objects.select_related("premises__request"), pk=file_id
-    )
-    load_request(request, f.premises.request_id)
+    f = get_object_or_404(Attachment.objects.select_related("premises"), pk=file_id)
+    get_object_or_404(catalog_scope(request), pk=f.premises_id)
+    if f.origin_request_id:
+        load_request(request, f.origin_request_id)
     audit(request.user, "attachment.downloaded", f.pk)
     from io import BytesIO
 
@@ -492,7 +701,7 @@ def compare(request, pk):
         elif action == "check":
             try:
                 for p in selected:
-                    evaluate(p, request.user)
+                    evaluate(p, request.user, obj)
                 messages.success(request, "Проверка и расчёт сохранены.")
                 return comparison_redirect(obj, selected, differences)
             except ValueError as exc:
@@ -550,10 +759,11 @@ def compare(request, pk):
                 )
     if valid:
         selected = list(form.cleaned_data["objects"].order_by("id"))
-        rows = compare_rows(selected, differences)
+        rows = compare_rows(selected, differences, request_obj=obj)
         for row in rows:
             criterion = next(
-                (r for r in obj.requirements.all() if str(r) == row["name"]), None
+                (r for r in obj.requirements.all() if r.pk == row["requirement_id"]),
+                None,
             )
             row["key"] = f"requirement:{criterion.pk}" if criterion else ""
             row["mandatory"] = criterion and criterion.priority == "required"
@@ -561,8 +771,8 @@ def compare(request, pk):
         columns = [
             {
                 "p": p,
-                "ev": current_evaluation(p),
-                "e": economics(p),
+                "ev": current_evaluation(p, obj),
+                "e": economics(p, obj),
                 "comparison_rows": [
                     {"name": r["name"], "cell": r["cells"][i]} for r in rows
                 ],
@@ -635,7 +845,7 @@ def checks(request, pk):
             raise Http404
         try:
             for p in selected:
-                evaluate(p, request.user)
+                evaluate(p, request.user, obj)
             messages.success(request, "Проверка и расчёт сохранены.")
         except ValueError as exc:
             messages.error(request, str(exc))
@@ -838,50 +1048,191 @@ def healthz(request):
     return HttpResponse("ok", content_type="text/plain")
 
 
+def filtered_catalog(request):
+    from django.db.models import F, ExpressionWrapper, DecimalField
+    from django.db.models.functions import Coalesce
+
+    form = CatalogFilterForm(request.GET)
+    qs = catalog_scope(request).order_by("-updated_at")
+    if not form.is_valid():
+        return qs.none(), form
+    d = form.cleaned_data
+    if d.get("q"):
+        qs = qs.filter(label__icontains=d["q"])
+    if d.get("premises_type"):
+        qs = qs.filter(premises_type=d["premises_type"])
+    if d.get("area_min") is not None:
+        qs = qs.filter(area__gte=d["area_min"])
+    if d.get("area_max") is not None:
+        qs = qs.filter(area__lte=d["area_max"])
+    if d.get("rent_max") is not None:
+        qs = qs.annotate(
+            base_rent=Coalesce(
+                F("rent"),
+                ExpressionWrapper(
+                    F("area") * F("rate"),
+                    output_field=DecimalField(max_digits=20, decimal_places=2),
+                ),
+            )
+        ).filter(base_rent__lte=d["rent_max"])
+    criteria = []
+    for field, code in [
+        ("power_min", "power_kw"),
+        ("water", "water_supply"),
+        ("ventilation", "ventilation"),
+    ]:
+        if d.get(field) is not None and d.get(field) != "":
+            char = Characteristic.objects.get(code=code)
+            criteria.append(
+                Requirement(
+                    characteristic=char,
+                    name=char.label,
+                    unit=char.unit,
+                    operator="gte" if field == "power_min" else "eq",
+                    minimum=d[field] if field == "power_min" else None,
+                    expected=d[field] == "yes",
+                    priority="required",
+                )
+            )
+    if criteria:
+        ids = [
+            p.pk
+            for p in qs
+            if all(check_requirement(r, p)["status"] == "pass" for r in criteria)
+        ]
+        qs = qs.filter(pk__in=ids)
+    return qs, form
+
+
 @workspace
 @require_GET
 def all_premises(request):
-    qs = (
-        Premises.objects.filter(request__in=accessible(request))
-        .select_related("request", "request__owner")
-        .order_by("-updated_at")
-    )
-    search = request.GET.get("q", "").strip()
-    if search:
-        qs = qs.filter(Q(label__icontains=search) | Q(request__title__icontains=search))
-    cards = [
-        {"p": p, "ev": current_evaluation(p), "economics": economics(p)} for p in qs
-    ]
+    qs, form = filtered_catalog(request)
+    cards = [{"p": p, "economics": economics(p)} for p in qs]
     return render(
         request,
         "all_premises.html",
-        {"cards": cards, "search": search, "section": "all_premises"},
+        {"cards": cards, "filter_form": form, "section": "all_premises"},
     )
 
 
 @workspace
 def start_premises(request):
-    choices = (
-        accessible(request)
-        .filter(owner=request.user, archived=False)
-        .exclude(stage="done")
-        .order_by("-updated_at")
-    )
+    return premises_edit(request)
 
-    class StartForm(forms.Form):
-        request_id = forms.ModelChoiceField(
-            label="К какому запросу добавить помещение?", queryset=choices
+
+@workspace
+@transaction.atomic
+def select_premises(request, pk):
+    req = load_request(
+        request, pk, write=request.method == "POST", lock=request.method == "POST"
+    )
+    qs, filters = filtered_catalog(request)
+
+    class AttachForm(forms.Form):
+        objects = forms.ModelMultipleChoiceField(
+            label="Выберите помещения", queryset=catalog_scope(request)
         )
 
-    form = StartForm(request.POST or None)
+        def clean_objects(self):
+            selected = self.cleaned_data["objects"]
+            if selected.count() > 100:
+                raise forms.ValidationError(
+                    "За один раз можно добавить не больше 100 помещений."
+                )
+            return selected
+
+    form = AttachForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        obj = load_request(request, form.cleaned_data["request_id"].pk, write=True)
-        return redirect("premises_new", pk=obj.pk)
+        changed = False
+        for p in form.cleaned_data["objects"]:
+            _, created = RequestPremises.objects.get_or_create(request=req, premises=p)
+            changed = changed or created
+        if changed:
+            req.selection_version += 1
+            req.save(update_fields=["selection_version"])
+            audit(request.user, "request.premises.attached", req.pk)
+        messages.success(request, "Помещения добавлены без создания копий.")
+        return redirect("objects", pk=pk)
     return render(
         request,
-        "start_premises.html",
-        {"form": form, "has_requests": choices.exists(), "section": "all_premises"},
+        "select_premises.html",
+        {
+            **tabs_context(request, req, "objects"),
+            "cards": [{"p": p, "economics": economics(p)} for p in qs],
+            "filter_form": filters,
+            "selection_form": form,
+            "attached_ids": list(req.premises.values_list("id", flat=True)),
+        },
     )
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def detach_premises(request, pk, object_id):
+    req = load_request(request, pk, write=True, lock=True)
+    link = get_object_or_404(
+        RequestPremises,
+        request=req,
+        premises_id=object_id,
+        premises__agency=request.member.agency,
+    )
+    link.delete()
+    req.selection_version += 1
+    req.save(update_fields=["selection_version"])
+    audit(request.user, "request.premises.detached", object_id)
+    messages.success(
+        request, "Связь убрана. Карточка, история проверок и PDF сохранены."
+    )
+    return redirect("objects", pk=pk)
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def apply_business_template(request, pk):
+    req = load_request(request, pk, write=True, lock=True)
+    templates = {
+        "Кофейня": ["water_supply", "sewerage", "ventilation", "separate_exhaust"],
+        "ПВЗ": ["separate_entrance", "loading_access", "visitor_access"],
+        "Магазин": ["display_windows", "loading_access", "visitor_access"],
+        "Салон красоты": ["water_supply", "sewerage", "ventilation"],
+        "Офис": ["visitor_access", "heating", "air_conditioning"],
+    }
+    business = request.POST.get("business")
+    if (
+        business not in templates
+        or not request.POST.get("confirm_template")
+        or not check_version(request, req)
+    ):
+        messages.error(
+            request,
+            "Выберите пример и подтвердите добавление. Если профиль изменился, обновите страницу.",
+        )
+        return redirect("profile", pk=pk)
+    changed = False
+    for code in templates[business]:
+        char = Characteristic.objects.get(code=code)
+        if not req.requirements.filter(characteristic=char).exists():
+            Requirement.objects.create(
+                request=req,
+                characteristic=char,
+                name=char.label,
+                unit=char.unit,
+                operator="eq",
+                priority="desired",
+            )
+            changed = True
+    if changed:
+        req.version += 1
+        req.save()
+        audit(request.user, "profile.template.added", req.pk)
+    messages.success(
+        request,
+        "Добавлены только примерные желательные условия, которых ещё не было. Значения мощности и нормы не подставляются; ваши требования сохранены.",
+    )
+    return redirect("profile", pk=pk)
 
 
 @login_required
@@ -950,7 +1301,13 @@ def refine(request, pk):
                     )
                 )
         for spec in specs:
-            Requirement.objects.create(request=obj, **spec)
+            char = resolve_characteristic(
+                obj.agency_id,
+                spec["name"],
+                spec["unit"],
+                "boolean" if spec["operator"] == "eq" else "number",
+            )
+            Requirement.objects.create(request=obj, characteristic=char, **spec)
             changed = True
         if changed:
             obj.version += 1

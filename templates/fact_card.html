@@ -1,0 +1,30 @@
+<article class="fact-card">
+  <h3>{{ entry.characteristic.label }}{% if entry.characteristic.unit %}, {{ entry.characteristic.unit }}{% endif %}</h3>{% if entry.latest %}<p class="fact-value">{% if entry.latest.value != None %}{{ entry.latest.value }}{% elif entry.latest.boolean != None %}{{ entry.latest.boolean|yesno:'Есть,Нет' }}{% else %}{{ entry.latest.text|default:'Неизвестно' }}{% endif %}</p>
+  <p class="pill {% if entry.conflict %}clarify{% else %}neutral{% endif %}">{% if entry.conflict %}Конфликт источников{% else %}{{ entry.latest.get_status_display }}{% endif %}</p>
+  <p class="source">{{ entry.latest.source }} · {{ entry.latest.observed_on|date:'d.m.Y' }} · {{ entry.latest.get_scope_display }}</p>{% if entry.latest.source_type == "archive" %}<p class="warning-text">Архив: текущее состояние не подтверждено.</p>{% endif %}
+{% else %}<p class="muted">Неизвестно</p>{% endif %}
+{% if can_edit %}<a href="?characteristic={{ entry.characteristic.code }}#evidence-form">Указать / уточнить →</a>{% endif %}
+{% if entry.records %}
+  <details>
+    <summary>История и источники ({{ entry.records|length }})</summary>{% for o in entry.records %}<div class="history-item">
+      <p>{% if o.value != None %}{{ o.value }} {{ o.unit }}{% elif o.boolean != None %}{{ o.boolean|yesno:'Есть,Нет' }}{% else %}{{ o.text|default:'Неизвестно' }}{% endif %} · {{ o.get_status_display }}{% if o.superseded %} · заменено{% endif %}</p>
+      <p class="source">{{ o.source }} · {{ o.observed_on|date:'d.m.Y' }} · {{ o.get_scope_display }} {{ o.locator }}</p>{% if o.source_url %}<p>
+        <a href="{{ o.source_url }}" rel="noopener noreferrer" target="_blank">Источник ↗</a>
+      </p>{% endif %}<p>{{ o.confirmation }}</p>{% if can_edit and not o.superseded %}<form method="post"
+                                                                                            action="{% if req %}
+{% url 'resolve' req.pk p.pk o.pk %}
+{% else %}
+{% url 'catalog_resolve' p.pk o.pk %}
+{% endif %}">{% csrf_token %}<input type="hidden" name="version" value="{{ p.version }}">
+        <label for="reason-{{ o.pk }}">Основание выбора актуального значения</label>
+        <input id="reason-{{ o.pk }}" name="reason" required maxlength="700">
+        {% if shared %}
+          <label>
+            <input type="checkbox" name="confirm_shared" required> Подтверждаю изменение во всех запросах</label>{% endif %}<button class="secondary">Выбрать источник</button>
+      </form>
+{% endif %}
+</div>
+{% endfor %}
+</details>
+{% endif %}
+</article>

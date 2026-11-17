@@ -13,6 +13,35 @@ from .forms import RequirementForm, PilotForm, ObservationForm, AttachmentForm
 from pypdf import PdfReader
 
 
+def make_premises(request, **values):
+    contextual = {
+        k: values.pop(k)
+        for k in ["adaptation", "other_once", "stress", "assumptions", "internal_notes"]
+        if k in values
+    }
+    p = Premises.objects.create(agency=request.agency, **values)
+    RequestPremises.objects.create(request=request, premises=p, **contextual)
+    return p
+
+
+def grouped_payload(data, req):
+    from .forms import GroupedRequirementsForm
+
+    grouped = GroupedRequirementsForm(request_obj=req)
+    result = dict(data)
+    for key in grouped.fields:
+        result.setdefault(
+            key, grouped[key].value() if grouped[key].value() is not None else ""
+        )
+    if data.get("requirements-0-name") == "Мощность":
+        result.update(
+            power_kw_min=data.get("requirements-0-minimum"),
+            power_kw_priority=data.get("requirements-0-priority", "required"),
+        )
+    result.update({"custom-TOTAL_FORMS": "0", "custom-INITIAL_FORMS": "0"})
+    return result
+
+
 class AcceptanceTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -41,7 +70,7 @@ class AcceptanceTests(TestCase):
         cls.power = Requirement.objects.create(
             request=cls.req, name="Мощность", unit="кВт", minimum=15
         )
-        cls.p = Premises.objects.create(
+        cls.p = make_premises(
             request=cls.req,
             label="Учебный объект А",
             area=60,
@@ -78,7 +107,7 @@ class AcceptanceTests(TestCase):
         return Observation.objects.create(**d)
 
     def result(self):
-        return evaluate(self.p, self.owner).result
+        return evaluate(self.p, self.owner, self.req).result
 
     def issue(self, objects=None, key=None, comment=""):
         return issue_report(
@@ -171,7 +200,7 @@ class AcceptanceTests(TestCase):
         self.assertEqual(Evaluation.objects.count(), 0)
 
     def test_economy_73000_3000_57000_170000(self):
-        e = economics(self.p)
+        e = economics(self.p, self.req)
         self.assertEqual(Decimal(e["monthly_total"]), 73000)
         self.assertTrue(e["complete"])
         self.assertEqual(Decimal(e["gap"]), 3000)
@@ -184,7 +213,7 @@ class AcceptanceTests(TestCase):
     def test_incomplete_monthly_and_budget_warning(self):
         self.p.other_monthly = None
         self.p.save()
-        e = economics(self.p)
+        e = economics(self.p, self.req)
         self.assertFalse(e["complete"])
         self.assertEqual(Decimal(e["monthly_total"]), 73000)
         self.assertIn("Превышение", e["budget_label"])
@@ -192,27 +221,26 @@ class AcceptanceTests(TestCase):
         self.p.operating = None
         self.p.save()
         self.assertNotEqual(
-            economics(self.p)["budget_label"], "В пределах месячного лимита"
+            economics(self.p, self.req)["budget_label"], "В пределах месячного лимита"
         )
 
     def test_vat_and_rent_conflict(self):
         self.p.vat_mode = "excluded"
         self.p.vat_rate = Decimal("20")
         self.p.save()
-        e = economics(self.p)
+        e = economics(self.p, self.req)
         self.assertEqual(Decimal(e["monthly_total"]), 85000)
         self.assertEqual(Decimal(e["allowed_rent"]), 47500)
         self.p.rent = 50000
         self.p.save()
-        e = economics(self.p)
+        e = economics(self.p, self.req)
         self.assertTrue(e["rent_conflict"])
         self.assertFalse(e["complete"])
 
     def test_negative_remaining_budget(self):
         self.req.budget = 10000
         self.req.save()
-        self.p.request = self.req
-        self.assertEqual(Decimal(economics(self.p)["allowed_rent"]), -3000)
+        self.assertEqual(Decimal(economics(self.p, self.req)["allowed_rent"]), -3000)
 
     def test_immutable_report_and_staleness(self):
         self.observe()
@@ -224,8 +252,7 @@ class AcceptanceTests(TestCase):
         self.req.save()
         with self.assertRaises(ValueError):
             self.issue()
-        self.p.request = self.req
-        evaluate(self.p, self.owner)
+        evaluate(self.p, self.owner, self.req)
         new = self.issue()
         old.refresh_from_db()
         self.assertEqual(bytes(old.pdf), data)
@@ -238,13 +265,13 @@ class AcceptanceTests(TestCase):
     def test_premises_edit_invalidates_only_its_check(self):
         self.observe()
         self.result()
-        other = Premises.objects.create(request=self.req, label="Б")
+        other = make_premises(request=self.req, label="Б")
         self.observe(p=other)
-        evaluate(other, self.owner)
+        evaluate(other, self.owner, self.req)
         self.p.version += 1
         self.p.save()
-        self.assertIsNone(current_evaluation(self.p))
-        self.assertIsNotNone(current_evaluation(other))
+        self.assertIsNone(current_evaluation(self.p, self.req))
+        self.assertIsNotNone(current_evaluation(other, self.req))
 
     def test_report_duplicate_click_and_duplicate_content(self):
         self.observe()
@@ -296,17 +323,21 @@ class AcceptanceTests(TestCase):
         )
 
     def test_differences_keeps_equal_blockers_and_unknown(self):
-        other = Premises.objects.create(request=self.req, label="Вариант Б")
+        other = make_premises(request=self.req, label="Вариант Б")
         self.observe(value=12)
         self.observe(p=other, value=12)
-        evaluate(self.p, self.owner)
-        evaluate(other, self.owner)
-        self.assertEqual(len(compare_rows([self.p, other], True)), 1)
+        evaluate(self.p, self.owner, self.req)
+        evaluate(other, self.owner, self.req)
+        self.assertEqual(
+            len(compare_rows([self.p, other], True, request_obj=self.req)), 1
+        )
         self.p.observations.all().delete()
         other.observations.all().delete()
-        evaluate(self.p, self.owner)
-        evaluate(other, self.owner)
-        self.assertEqual(len(compare_rows([self.p, other], True)), 1)
+        evaluate(self.p, self.owner, self.req)
+        evaluate(other, self.owner, self.req)
+        self.assertEqual(
+            len(compare_rows([self.p, other], True, request_obj=self.req)), 1
+        )
 
     def test_realtor_and_agency_isolation_on_all_routes(self):
         self.observe()
@@ -314,6 +345,7 @@ class AcceptanceTests(TestCase):
         report = self.issue()
         f = Attachment.objects.create(
             premises=self.p,
+            origin_request=self.req,
             filename="private.pdf",
             data=b"private",
             content_type="application/pdf",
@@ -468,7 +500,9 @@ class AcceptanceTests(TestCase):
             "requirements-TOTAL_FORMS": 0,
             "requirements-INITIAL_FORMS": 0,
         }
-        response = self.client.post(f"/app/requests/{self.req.pk}/profile", d)
+        response = self.client.post(
+            f"/app/requests/{self.req.pk}/profile", grouped_payload(d, self.req)
+        )
         self.assertEqual(response.status_code, 409)
         self.req.refresh_from_db()
         self.assertEqual(self.req.title, "Условная кофейня")
@@ -516,7 +550,7 @@ class AcceptanceTests(TestCase):
         other = ClientRequest.objects.create(
             agency=self.agency, owner=self.owner, title="Другой запрос"
         )
-        foreign = Premises.objects.create(request=other, label="Чужой вариант")
+        foreign = make_premises(request=other, label="Чужой вариант")
         response = self.client.get(
             f"/app/requests/{self.req.pk}/compare", {"objects": [self.p.pk, foreign.pk]}
         )
@@ -612,6 +646,12 @@ class AcceptanceTests(TestCase):
             "requirements-0-expected": "on",
             "requirements-0-priority": "required",
         }
+        profile = grouped_payload(
+            profile,
+            ClientRequest(
+                owner=User.objects.get(username=inv.email), agency=self.agency
+            ),
+        )
         response = c.post("/app/requests/new", profile)
         self.assertEqual(response.status_code, 302)
         req = ClientRequest.objects.get(creation_key=request_key)
@@ -623,6 +663,7 @@ class AcceptanceTests(TestCase):
             pkey = uuid.uuid4()
             data = {
                 "label": label,
+                "premises_type": "unknown",
                 "area": "60",
                 "rate": "1000",
                 "operating": "8000",
@@ -646,7 +687,7 @@ class AcceptanceTests(TestCase):
             p = Premises.objects.get(creation_key=pkey)
             okey = uuid.uuid4()
             observation = {
-                "name": "Мощность",
+                "characteristic": Characteristic.objects.get(code="power_kw").pk,
                 "value": str(power),
                 "unit": "кВт",
                 "scope": "premises",
@@ -713,12 +754,14 @@ class AcceptanceTests(TestCase):
             "requirements-0-priority": "required",
         }
         self.assertRedirects(
-            self.client.post(f"/app/requests/{self.req.pk}/profile", d),
+            self.client.post(
+                f"/app/requests/{self.req.pk}/profile", grouped_payload(d, self.req)
+            ),
             f"/app/requests/{self.req.pk}/refine",
         )
         self.req.refresh_from_db()
         self.assertEqual(self.req.version, 1)
-        self.assertIsNotNone(current_evaluation(self.p))
+        self.assertIsNotNone(current_evaluation(self.p, self.req))
 
     def test_sidebar_contains_premises_and_no_workflow_tabs(self):
         response = self.client.get(f"/app/requests/{self.req.pk}/profile")
@@ -731,27 +774,20 @@ class AcceptanceTests(TestCase):
         req = ClientRequest.objects.create(
             agency=self.agency, owner=self.colleague, title="Коллега"
         )
-        Premises.objects.create(request=req, label="Вариант коллеги")
+        make_premises(request=req, label="Вариант коллеги")
         foreign = ClientRequest.objects.create(
             agency=self.other_agency, owner=self.outsider, title="Другое агентство"
         )
-        Premises.objects.create(request=foreign, label="Закрытый чужой вариант")
+        make_premises(request=foreign, label="Закрытый чужой вариант")
         response = self.client.get("/app/premises")
         self.assertContains(response, self.p.label)
-        self.assertNotContains(response, "Вариант коллеги")
+        self.assertContains(response, "Вариант коллеги")
         self.client.force_login(self.manager)
         response = self.client.get("/app/premises")
         self.assertContains(response, "Вариант коллеги")
         self.assertNotContains(response, "Закрытый чужой вариант")
-        self.assertEqual(
-            self.client.post("/app/premises/new", {"request_id": req.pk}).status_code,
-            200,
-        )
         self.client.force_login(self.owner)
-        self.assertRedirects(
-            self.client.post("/app/premises/new", {"request_id": self.req.pk}),
-            f"/app/requests/{self.req.pk}/objects/new",
-        )
+        self.assertContains(self.client.get("/app/premises/new"), "Новое помещение")
 
     def test_refinement_only_asks_missing_conditions_and_saves(self):
         response = self.client.get(f"/app/requests/{self.req.pk}/refine")
@@ -847,7 +883,7 @@ class AcceptanceTests(TestCase):
         self.assertEqual(self.req.selection_version, 2)
         self.assertEqual(self.req.version, 1)
         self.assertIn(f"requirement:{desired.pk}", self.req.report_parameters)
-        self.assertIsNotNone(current_evaluation(self.p))
+        self.assertIsNotNone(current_evaluation(self.p, self.req))
         snapshot = report_snapshot(self.req, [self.p], "", parameters=[])
         self.assertEqual(len(snapshot["objects"][0]["rows"]), 1)
         snapshot = report_snapshot(
@@ -933,7 +969,7 @@ class ConcurrentSubmissionTests(TransactionTestCase):
         Requirement.objects.create(
             request=self.req, name="Мощность", unit="кВт", minimum=15
         )
-        self.p = Premises.objects.create(request=self.req, label="Условное помещение")
+        self.p = make_premises(request=self.req, label="Условное помещение")
         Observation.objects.create(
             premises=self.p,
             name="Мощность",
@@ -946,7 +982,7 @@ class ConcurrentSubmissionTests(TransactionTestCase):
             confirmation="Демо",
             author=self.u,
         )
-        evaluate(self.p, self.u)
+        evaluate(self.p, self.u, self.req)
 
     def test_concurrent_report_submissions_are_single_version(self):
         barrier = Barrier(2)

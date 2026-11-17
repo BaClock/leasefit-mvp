@@ -11,10 +11,21 @@ from leasefit.models import (
     Evaluation,
     Report,
     Attachment,
+    Requirement,
+    Characteristic,
+    RequestPremises,
 )
 
 manifest = {}
-for model in [ClientRequest, Premises, Observation, Evaluation]:
+for model in [
+    ClientRequest,
+    Premises,
+    RequestPremises,
+    Requirement,
+    Characteristic,
+    Observation,
+    Evaluation,
+]:
     records = list(model.objects.order_by("id").values())
     payload = json.dumps(
         records, sort_keys=True, ensure_ascii=False, default=str

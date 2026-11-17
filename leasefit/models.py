@@ -67,11 +67,38 @@ class ClientRequest(models.Model):
     def ready(self):
         return self.requirements.filter(priority="required").exists()
 
+    premises = models.ManyToManyField(
+        "Premises", through="RequestPremises", related_name="requests"
+    )
     report_parameters = models.JSONField(default=list, blank=True)
     selection_version = models.PositiveIntegerField(default=1)
 
     def __str__(self):
         return self.title
+
+
+class Characteristic(models.Model):
+    code = models.SlugField(max_length=90, unique=True)
+    label = models.CharField(max_length=100)
+    group = models.CharField(
+        max_length=20,
+        choices=[
+            ("layout", "Площадь и планировка"),
+            ("engineering", "Инженерные коммуникации"),
+            ("access", "Доступность и эксплуатация"),
+            ("custom", "Дополнительные требования"),
+        ],
+    )
+    value_type = models.CharField(
+        max_length=12,
+        choices=[("number", "Число"), ("boolean", "Да / нет"), ("text", "Текст")],
+    )
+    unit = models.CharField(max_length=25, blank=True)
+    allowed_operators = models.JSONField(default=list)
+    agency = models.ForeignKey(Agency, on_delete=models.PROTECT, null=True, blank=True)
+
+    def __str__(self):
+        return self.label
 
 
 class Requirement(models.Model):
@@ -80,11 +107,13 @@ class Requirement(models.Model):
         ("desired", "Желательное"),
         ("na", "Не применимо"),
     ]
-    OPERATORS = [("gte", "≥"), ("lte", "≤"), ("range", "Диапазон"), ("eq", "Да / нет")]
+    OPERATORS = [("gte", "≥"), ("lte", "≤"), ("range", "Диапазон"), ("eq", "Точно")]
     request = models.ForeignKey(
         ClientRequest, on_delete=models.CASCADE, related_name="requirements"
     )
-    name = models.CharField("Параметр (одинаковое имя в карточке)", max_length=100)
+    characteristic = models.ForeignKey(Characteristic, on_delete=models.PROTECT)
+    name = models.CharField("Параметр", max_length=100)
+    expected_text = models.CharField("Требуемое значение", max_length=500, blank=True)
     unit = models.CharField("Единица", max_length=25, blank=True)
     operator = models.CharField(
         "Оператор", max_length=8, choices=OPERATORS, default="gte"
@@ -104,26 +133,54 @@ class Requirement(models.Model):
         ]
 
     def __str__(self):
+        if self.operator == "eq":
+            if self.characteristic.value_type == "boolean":
+                return f"{self.name}: {'да' if self.expected else 'нет'}"
+            if self.characteristic.value_type == "text":
+                return f"{self.name}: {self.expected_text}"
         val = (
-            ("да" if self.expected else "нет")
-            if self.operator == "eq"
-            else (
-                f"{self.minimum}–{self.maximum}"
-                if self.operator == "range"
-                else str(self.minimum)
+            f"{self.minimum}–{self.maximum}"
+            if self.operator == "range"
+            else str(self.minimum)
+        )
+        return f"{self.name}: {self.get_operator_display()} {val} {self.unit}"
+
+    def save(self, *args, **kwargs):
+        if not self.characteristic_id:
+            from .characteristics import resolve_characteristic
+
+            self.characteristic = resolve_characteristic(
+                self.request.agency_id,
+                self.name,
+                self.unit,
+                "boolean"
+                if self.operator == "eq" and not self.expected_text
+                else "text"
+                if self.expected_text
+                else "number",
             )
-        )
-        return (
-            f"{self.name}: {val}"
-            if self.operator == "eq"
-            else f"{self.name}: {self.get_operator_display()} {val} {self.unit}"
-        )
+        return super().save(*args, **kwargs)
 
 
 class Premises(models.Model):
-    request = models.ForeignKey(
-        ClientRequest, on_delete=models.CASCADE, related_name="premises"
+    agency = models.ForeignKey(
+        Agency, on_delete=models.PROTECT, related_name="premises"
     )
+    premises_type = models.CharField(
+        "Тип помещения",
+        max_length=30,
+        choices=[
+            ("unknown", "Не указан"),
+            ("retail", "Торговое"),
+            ("office", "Офис"),
+            ("food", "Общепит"),
+            ("warehouse", "Склад"),
+            ("service", "Услуги"),
+            ("other", "Другое"),
+        ],
+        default="unknown",
+    )
+    lease_terms = models.TextField("Подтверждённые общие условия договора", blank=True)
     label = models.CharField("Адрес или рабочая метка", max_length=250)
     floor = models.CharField("Этаж", max_length=40, blank=True)
     number = models.CharField("Номер помещения", max_length=60, blank=True)
@@ -191,27 +248,58 @@ class Premises(models.Model):
         "Возвратность депозита подтверждена", default=False
     )
     commission = models.DecimalField("Комиссия, ₽", **money)
-    adaptation = models.DecimalField("Ремонт / адаптация, ₽", **money)
-    other_once = models.DecimalField("Прочие разовые, ₽", **money)
-    stress = models.DecimalField(
-        "Допущение: увеличение регулярных расходов, ₽/мес.",
-        max_digits=14,
-        decimal_places=2,
-        default=0,
-        validators=[MinValueValidator(0)],
-    )
-    assumptions = models.TextField(
-        "Допущения и условия (каникулы, индексация)", blank=True
-    )
-    internal_notes = models.TextField(
-        "Внутренние заметки (не попадут в PDF)", blank=True
-    )
     version = models.PositiveIntegerField(default=1)
     creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.label
+
+
+class RequestPremises(models.Model):
+    request = models.ForeignKey(
+        ClientRequest, on_delete=models.CASCADE, related_name="premises_links"
+    )
+    premises = models.ForeignKey(
+        Premises, on_delete=models.PROTECT, related_name="request_links"
+    )
+    adaptation = models.DecimalField("Ремонт / адаптация для клиента, ₽", **money)
+    other_once = models.DecimalField("Прочие стартовые затраты клиента, ₽", **money)
+    stress = models.DecimalField(
+        "Допущение клиента: увеличение расходов, ₽/мес.",
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    assumptions = models.TextField("Допущения для этого клиента", blank=True)
+    internal_notes = models.TextField(
+        "Внутренние заметки запроса (не попадут в PDF)", blank=True
+    )
+    version = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["request", "premises"], name="unique_request_premises"
+            )
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if (
+            self.request_id
+            and self.premises_id
+            and self.request.agency_id != self.premises.agency_id
+        ):
+            raise ValidationError(
+                "Помещение и запрос должны принадлежать одному агентству."
+            )
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
 
 class Observation(models.Model):
@@ -236,6 +324,14 @@ class Observation(models.Model):
     ]
     premises = models.ForeignKey(
         Premises, on_delete=models.CASCADE, related_name="observations"
+    )
+    characteristic = models.ForeignKey(Characteristic, on_delete=models.PROTECT)
+    document = models.ForeignKey(
+        "Attachment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="observations",
     )
     name = models.CharField("Параметр", max_length=100)
     value = models.DecimalField("Числовое значение", **money)
@@ -267,8 +363,29 @@ class Observation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
 
+    def save(self, *args, **kwargs):
+        if not self.characteristic_id:
+            from .characteristics import resolve_characteristic
+
+            self.characteristic = resolve_characteristic(
+                self.premises.agency_id,
+                self.name,
+                self.unit,
+                "number"
+                if self.value is not None
+                else "boolean"
+                if self.boolean is not None
+                else "text",
+            )
+        return super().save(*args, **kwargs)
+
 
 class Evaluation(models.Model):
+    request = models.ForeignKey(
+        ClientRequest, on_delete=models.PROTECT, related_name="evaluations"
+    )
+    context_version = models.PositiveIntegerField(default=1)
+    link_identity = models.PositiveBigIntegerField(default=0)
     premises = models.ForeignKey(
         Premises, on_delete=models.CASCADE, related_name="evaluations"
     )
@@ -282,12 +399,25 @@ class Evaluation(models.Model):
     @property
     def current(self):
         return (
-            self.profile_version == self.premises.request.version
+            self.profile_version == self.request.version
             and self.premises_version == self.premises.version
+            and RequestPremises.objects.filter(
+                pk=self.link_identity,
+                request_id=self.request_id,
+                premises_id=self.premises_id,
+                version=self.context_version,
+            ).exists()
         )
 
 
 class Attachment(models.Model):
+    origin_request = models.ForeignKey(
+        ClientRequest,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="legacy_attachments",
+    )
     premises = models.ForeignKey(
         Premises, on_delete=models.CASCADE, related_name="attachments"
     )

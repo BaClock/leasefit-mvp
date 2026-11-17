@@ -20,10 +20,14 @@
           <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
           <p class="agency">{{ member.agency.name }}</p>
           <nav aria-label="Главное меню">
-            <a class="nav-item" aria-label="Запросы" href="{% url 'requests' %}">▦ <span>Запросы</span>
+            <a class="nav-item"
+               aria-label="Запросы"
+               {% if request.path|slice:":13" == "/app/requests" %}aria-current="page"{% endif %}
+               href="{% url 'requests' %}">▦ <span>Запросы</span>
             </a>
             <a class="nav-item"
                aria-label="Помещения"
+               {% if request.path|slice:":13" == "/app/premises" %}aria-current="page"{% endif %}
                href="{% url 'all_premises' %}">⌂ <span>Помещения</span>
               </a>{% if can_parse %}<a class="nav-item"
                                        aria-label="Парсинг"

@@ -4,10 +4,22 @@
   {% include "request_header.html" %}
   <div class="section-heading">
     <div>
-      <h2>Помещения для этого запроса</h2>
-      <p>Добавьте найденные варианты, затем перейдите к проверке и сравнению.</p>
-    </div>{% if can_edit %}<a class="button secondary" href="{% url 'premises_new' req.pk %}">＋ Добавить помещение</a>{% endif %}</div>{% include "premises_cards.html" %}<div class="actions">
-      <a class="button secondary" href="{% url 'refine' req.pk %}">← Назад к уточнениям</a>
-      <a class="button" href="{% url 'compare' req.pk %}">Далее: проверка и сравнение →</a>
+      <h2>Помещения в запросе</h2>
+      <p>Выберите общую карточку агентства — повторный ввод характеристик не нужен.</p>
     </div>
+  </div>
+  {% if can_edit %}
+    <section class="panel">
+      <h3>Добавить помещение</h3>
+      <div class="actions">
+        <a class="button" href="{% url 'select_premises' req.pk %}">Выбрать из каталога</a>
+        <a class="button secondary" href="{% url 'premises_new' req.pk %}">Создать новое помещение</a>
+      </div>
+    </section>
+  {% endif %}
+  {% include "premises_cards.html" %}
+  <div class="actions">
+    <a class="button secondary" href="{% url 'refine' req.pk %}">← Назад к уточнениям</a>
+    <a class="button" href="{% url 'compare' req.pk %}">Далее: проверка и сравнение →</a>
+  </div>
 {% endblock %}

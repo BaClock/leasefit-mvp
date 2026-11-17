@@ -3,52 +3,95 @@
   {% if new %}
     <div class="breadcrumb">
       <a href="{% url 'requests' %}">Запросы</a> / Новый запрос</div>
-    <h1>Новый запрос</h1>
-    <p class="lead">Сначала потребность клиента. Затем — подходящие помещения.</p>{% else %}
+    <h1>Профиль бизнеса</h1>{% else %}
     {% include "request_header.html" %}
   {% endif %}
   <form method="post" class="dirty-form">
     {% csrf_token %}
     <fieldset {% if not new and not can_edit %}disabled{% endif %}>
       <section class="panel">
-        <div class="section-heading">
-          <h2>Профиль бизнеса</h2>
-          <span class="muted">* Обязательные поля</span>
-        </div>
+        <h2>Запрос клиента</h2>
         <div class="form-grid">{% include "fields.html" %}</div>
-        <p class="hint">Бюджет можно оставить неизвестным. Для черновика достаточно названия, города и формата.</p>
-      </section>
-      <section class="panel">
-        <div class="section-heading">
-          <div>
-            <h2>Требования к помещению</h2>
-            <p>Минимум одно обязательное условие для запуска проверки.</p>
-          </div>
-        </div>
-        <p class="hint">Пример для кофейни: «Мощность», кВт, ≥ 15; «Отдельная вытяжка», да / нет. Это условия клиента, а не универсальные нормы.</p>{{ formset.management_form }}{{ formset.non_form_errors }}<div id="requirements">{% for rf in formset %}<div class="requirement-form">{% include "fields.html" with form=rf %}</div>{% endfor %}</div>
-        <template id="requirement-template">
-          <div class="requirement-form">{% include "fields.html" with form=formset.empty_form %}</div>
-        </template>
-        <button type="button" class="secondary" id="add-requirement">＋ Добавить требование</button>
-      </section>
-      <div class="actions">
-        <button>Далее: уточнить профиль →</button>
-        <span class="muted">Правка профиля потребует пересчёта всех вариантов.</span>
-      </div>
-    </fieldset>
-  </form>
-  {% if req.pk and not can_edit %}<a class="button"
-                                     href="{% url 'refine' req.pk %}">Далее: уточнения →</a>{% endif %}
-  {% if req.pk and is_owner %}
-    <section class="panel lifecycle">
-      <h2>Состояние запроса</h2>
-      <p>Архив скрывает запрос из активного списка и сохраняет историю. Для правки завершённого запроса верните его в работу.</p>
-      <form method="post" action="{% url 'lifecycle' req.pk %}">{% csrf_token %}<input type="hidden" name="version" value="{{ req.version }}">{% if req.archived %}<button name="action" value="restore" class="secondary">Восстановить из архива</button>{% else %}
-      {% if req.stage == "done" %}<button name="action" value="active" class="secondary">Вернуть в работу</button>{% else %}<button name="action" value="active" class="secondary">В работу</button>
-      <button name="action" value="done" class="secondary">Завершить подбор</button>{% endif %}<button name="action"
-                                                                                                       value="archive"
-                                                                                                       class="danger"
-                                                                                                       data-confirm="Запрос переместится в архив. История сохранится.">Архивировать</button>{% endif %}</form>
-</section>
+        <datalist id="business-formats">
+          <option value="Кофейня">
+            <option value="ПВЗ">
+              <option value="Магазин">
+                <option value="Салон красоты">
+                  <option value="Офис">
+                  </datalist>
+                  <p class="hint">Смена формата бизнеса не заменяет ваши требования. Примерный шаблон можно добавить отдельно после сохранения.</p>
+                </section>
+                <h2>Требования к помещению</h2>
+                <p class="lead">Укажите характеристики, необходимые для бизнеса клиента. Система проверит, какие помещения соответствуют этим условиям.</p>
+                <p class="hint">«Не важно» — пожелание клиента. «Неизвестно» — состояние данных помещения. Отсутствующие сведения не означают соответствие. Числовые значения и важность задаёте вы.</p>
+                {{ grouped.non_field_errors }}
+                {% for group in grouped.groups %}
+                  <section class="panel requirement-group">
+                    <h2>{{ group.title }}</h2>
+                    <div class="form-grid">
+                      {% for entry in group.primary %}
+                        {% include "requirement_entry.html" %}
+                      {% endfor %}
+                    </div>
+                    {% if group.advanced %}
+                      <details>
+                        <summary>Дополнительные параметры</summary>
+                        <div class="form-grid">
+                          {% for entry in group.advanced %}
+                            {% include "requirement_entry.html" %}
+                          {% endfor %}
+                        </div>
+                      </details>
+                    {% endif %}
+                  </section>
+                {% endfor %}
+                <section class="panel">
+                  <details {% if formset.total_error_count %}open{% endif %}>
+                    <summary>Дополнительные требования · свой параметр{% if grouped.ambiguous_codes %} и прежние составные условия{% endif %}</summary>
+                    <p>Для нестандартного условия укажите название и тип. Его идентификатор сохраняется при переименовании. Прежние дубли стандартных характеристик остаются здесь до явного редактирования.</p>{{ formset.management_form }}{{ formset.non_form_errors }}<div id="custom-requirements">{% for rf in formset %}<div class="requirement-form">{% include "fields.html" with form=rf %}</div>{% endfor %}</div>
+                    <template id="custom-template">
+                      <div class="requirement-form">{% include "fields.html" with form=formset.empty_form %}</div>
+                    </template>
+                    <button type="button" class="secondary" id="add-custom">＋ Добавить свой параметр</button>
+                  </details>
+                </section>
+                <div class="actions">
+                  <button>Далее: уточнить профиль →</button>
+                </div>
+              </fieldset>
+            </form>
+            {% if req.pk %}
+              {% if can_edit %}
+                <section class="panel">
+                  <h2>Примерные шаблоны бизнеса</h2>
+                  <p>Это редактируемая отправная точка, а не нормы. Будут добавлены только отсутствующие желательные условия, без числовых нормативов мощности и без удаления вашего ввода.</p>
+                  <form method="post" action="{% url 'business_template' req.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="version" value="{{ req.version }}">
+                    <label for="business-template">Пример для бизнеса</label>
+                    <select id="business-template" name="business">
+                      <option>Кофейня</option>
+                      <option>ПВЗ</option>
+                      <option>Магазин</option>
+                      <option>Салон красоты</option>
+                      <option>Офис</option>
+                    </select>
+                    <label class="inline">
+                      <input type="checkbox" name="confirm_template" required>
+                      Подтверждаю добавление примерных желательных условий
+                    </label>
+                    <button class="secondary">Добавить примерные условия</button>
+                  </form>
+                </section>
+              {% endif %}
+              {% if not can_edit %}<a class="button" href="{% url 'refine' req.pk %}">Далее →</a>{% endif %}
+              {% if is_owner %}
+                <section class="panel">
+                  <h2>Состояние запроса</h2>
+                  <form method="post" action="{% url 'lifecycle' req.pk %}">{% csrf_token %}<input type="hidden" name="version" value="{{ req.version }}">{% if req.archived %}<button name="action" value="restore" class="secondary">Восстановить из архива</button>{% else %}
+                  {% if req.stage == "done" %}<button name="action" value="active">Вернуть в работу</button>{% else %}<button name="action" value="active" class="secondary">В работу</button>
+                  <button name="action" value="done" class="secondary">Завершить подбор</button>{% endif %}<button name="action" value="archive" class="secondary">Архивировать</button>{% endif %}</form>
+          </section>
+{% endif %}
 {% endif %}
 {% endblock %}

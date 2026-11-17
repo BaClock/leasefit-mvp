@@ -1,0 +1,7 @@
+<div class="requirement-entry">
+  <h3>{{ entry.label }}</h3>
+  <div class="entry-fields">
+    {% for field in entry.fields %}
+      <div class="field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}</div>
+  </div>

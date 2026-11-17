@@ -3,23 +3,17 @@
 {% block content %}
   <div class="page-heading">
     <div>
-      <div class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <div class="eyebrow">КАТАЛОГ АГЕНТСТВА</div>
       <h1>Все помещения</h1>
-      <p>Все доступные вам варианты по клиентским запросам, включая архивные.</p>
+      <p>Одна карточка помещения — несколько клиентских запросов и независимые результаты проверки.</p>
     </div>
     <a class="button" href="{% url 'start_premises' %}">＋ Добавить помещение</a>
   </div>
-  <section class="panel">
-    <form method="get" class="filters">
-      <div class="field">
-        <label for="premises-search">Адрес, метка или название запроса</label>
-        <input id="premises-search"
-               name="q"
-               value="{{ search }}"
-               placeholder="Поиск по помещениям">
-      </div>
-      <button class="secondary">Найти</button>{% if can_parse %}<a class="button secondary"
-                                                                   href="{% url 'parser' %}">Парсинг объявлений</a>{% endif %}</form>
-  </section>
+  {% if can_parse %}
+    <p>
+      <a href="{% url 'parser' %}">Парсинг объявлений · в разработке</a>
+    </p>
+  {% endif %}
+  {% include "catalog_filters.html" %}
   {% include "premises_cards.html" %}
 {% endblock %}

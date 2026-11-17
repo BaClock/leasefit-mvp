@@ -1,14 +1,14 @@
 :root {
-  --bg: #0b1220;
-  --section: #111a2b;
-  --card: #162033;
-  --border: #24324a;
-  --text: #e9eff9;
-  --muted: #a8b7ce;
-  --accent: #7ca4ff;
-  --green: #83dfb5;
-  --amber: #ffce82;
-  --red: #ffa4ae;
+  --bg: #f5f7fa;
+  --section: #ffffff;
+  --card: #f8fafd;
+  --border: #d4dce8;
+  --text: #17243b;
+  --muted: #53657d;
+  --accent: #2453c3;
+  --green: #16754e;
+  --amber: #8b580a;
+  --red: #b32640;
 }
 * {
   box-sizing: border-box;
@@ -163,10 +163,6 @@ fieldset:disabled textarea {
   padding: 12px 14px;
   border-radius: 8px;
   margin-bottom: 8px;
-}
-.nav-item:first-child {
-  background: #1e3050;
-  color: #b9d0ff;
 }
 .nav-item:hover {
   background: #24334b;
@@ -1169,5 +1165,229 @@ summary {
   }
   .report-parameters .parameter-button {
     width: 100%;
+  }
+}
+/* Current product direction: a light, compact workspace. */
+
+body {
+  color: var(--text);
+}
+.sidebar,
+.topbar {
+  background: #fff;
+}
+.topbar strong {
+  color: var(--text);
+}
+.workspace-label,
+.eyebrow {
+  color: #486286;
+}
+.nav-item {
+  color: #425978;
+}
+.nav-item:hover,
+.sidebar .nav-item[aria-current="page"] {
+  background: #e9effb;
+  color: #2453c3;
+}
+.user {
+  color: var(--text);
+}
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  background: #fff;
+  color: var(--text);
+  border-color: #b8c6d9;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #71829c;
+}
+.field label,
+label {
+  color: #344c6c;
+}
+.secondary {
+  background: #fff;
+  color: #2453c3;
+  border-color: #afbfdc;
+}
+.secondary:hover {
+  background: #edf2fb;
+}
+.hint {
+  background: #edf3ff;
+  color: #344d78;
+  border-color: #7294da;
+}
+.question {
+  background: #edf2fb;
+  color: #253f67;
+}
+.pill.neutral {
+  background: #edf1f7;
+  color: #485c78;
+  border-color: #d4dce8;
+}
+.pill.pass,
+.status-text.pass {
+  background: #e4f4eb;
+  color: #16633f;
+  border-color: #a9d9be;
+}
+.pill.blocker,
+.status-text.blocker {
+  background: #fce8eb;
+  color: #a3243b;
+  border-color: #e9afb8;
+}
+.pill.clarify,
+.pill.desired_fail,
+.status-text.clarify {
+  background: #fff3dd;
+  color: #855306;
+  border-color: #e6c98b;
+}
+.warning-text {
+  color: #855306;
+}
+.notice {
+  background: #edf3ff;
+  color: #244473;
+  border-color: #b7cbef;
+}
+.notice.success {
+  background: #e8f6ee;
+  color: #216441;
+  border-color: #a9d8bc;
+}
+.notice.warning {
+  background: #fff5e2;
+  color: #825312;
+  border-color: #ead09c;
+}
+.notice.error,
+.errorlist {
+  background: #fceaed;
+  color: #a3243b;
+  border-color: #e4afb8;
+}
+.budget-over {
+  color: #b32640 !important;
+}
+.check-row {
+  background: #f8fafd;
+}
+.card-stats small,
+.card-bottom,
+.source {
+  color: var(--muted);
+}
+.compare th:first-child {
+  background: #edf2f9;
+}
+.compare thead th {
+  background: #eaf0fa;
+}
+.group-row th {
+  background: #dfe8f8 !important;
+}
+.count {
+  background: #e4ebf7;
+  color: #29466d;
+}
+.link-button {
+  color: #2453c3;
+}
+.icon-box {
+  background: #e3ecff;
+  color: #2453c3;
+}
+.workflow-steps span {
+  background: #fff;
+}
+.workflow-steps [aria-current="step"] span {
+  background: #2453c3;
+}
+.auth-panel p {
+  color: var(--muted);
+}
+.request-card {
+  box-shadow: 0 2px 7px #24324a06;
+}
+.requirement-entry,
+.fact-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfe;
+  padding: 16px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.requirement-entry h3 {
+  font-size: 14px;
+}
+.entry-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+.entry-fields .field:first-child {
+  grid-column: 1/-1;
+}
+.requirement-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.fact-value {
+  font-size: 20px;
+  font-weight: 600;
+}
+.history-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.requirement-group .form-grid {
+  align-items: start;
+}
+.compare-scroll {
+  background: white;
+}
+button,
+.button {
+  background: #2453c3;
+}
+.button.secondary,
+button.secondary {
+  background: #fff;
+}
+.request-card a {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 768px) {
+  .fact-grid,
+  .entry-fields {
+    grid-template-columns: 1fr;
+  }
+  .requirement-form {
+    grid-template-columns: 1fr;
+  }
+  .entry-fields .field:first-child {
+    grid-column: auto;
+  }
+  .sidebar {
+    padding: 12px;
+  }
+  .panel {
+    padding: 18px;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
   }
 }

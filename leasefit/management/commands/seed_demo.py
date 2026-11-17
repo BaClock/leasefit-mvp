@@ -73,7 +73,7 @@ class Command(BaseCommand):
                 ("Вариант В · учебная площадь, 3", 12, True, 59000, "document"),
             ]:
                 p = Premises.objects.create(
-                    request=req,
+                    agency=agency,
                     label=label,
                     commercial_source_type="owner",
                     commercial_source="Вымышленное письмо с условиями аренды",
@@ -90,12 +90,16 @@ class Command(BaseCommand):
                     deposit=60000,
                     deposit_refundable=True,
                     commission=20000,
+                    listing_url="https://example.invalid/demo",
+                )
+                RequestPremises.objects.create(
+                    request=req,
+                    premises=p,
                     adaptation=90000,
                     other_once=0,
                     stress=5000,
                     assumptions="Условные суммы. Реального предложения аренды нет.",
                     internal_notes="ВНУТРЕННЯЯ ЗАМЕТКА — только для команды",
-                    listing_url="https://example.invalid/demo",
                 )
                 Observation.objects.create(
                     premises=p,
@@ -148,7 +152,7 @@ class Command(BaseCommand):
                             status="unverified",
                             author=owner,
                         )
-                evaluate(p, owner)
+                evaluate(p, owner, req)
         email = "new-agent@example.invalid"
         if o["fresh_invitation"] or User.objects.filter(username=email).exists():
             email = "new-agent-" + secrets.token_hex(6) + "@example.invalid"

@@ -4,17 +4,17 @@ from django.db import transaction
 from django.utils import timezone
 from .models import *
 
-RULES_VERSION = "p0-1.0"
+RULES_VERSION = "p0-2.1"
 LABELS = {
-    "blocker": "Есть подтверждённый блокер",
+    "blocker": "Не соответствует · подтверждённый блокер",
     "clarify": "Требует уточнения",
-    "pass": "Можно рассматривать",
+    "pass": "Соответствует",
     "stale": "Не проверено — нужен пересчёт",
 }
 ROW_LABELS = {
-    "blocker": "Блокер",
-    "clarify": "Уточнить",
-    "pass": "Выполнено",
+    "blocker": "Не соответствует · Блокер",
+    "clarify": "Требует уточнения",
+    "pass": "Соответствует",
     "desired_fail": "Желательное не выполнено",
 }
 
@@ -56,8 +56,26 @@ def source_snapshot(o):
     }
 
 
+def normalized_text(code, value):
+    value = " ".join(value.strip().casefold().split())
+    if code == "floor":
+        return {
+            "первый этаж": "1",
+            "1-й этаж": "1",
+            "1 этаж": "1",
+            "второй этаж": "2",
+            "2 этаж": "2",
+            "подвал": "basement",
+            "цоколь": "ground",
+        }.get(value, value)
+    return value
+
+
 def check_requirement(req, p):
-    observations = list(p.observations.filter(name__iexact=req.name).order_by("id"))
+    observations = list(
+        p.observations.filter(characteristic_id=req.characteristic_id).order_by("id")
+    )
+    kind = req.characteristic.value_type
     live = [o for o in observations if not o.superseded]
     sources = [source_snapshot(o) for o in observations]
     reason = "Нет актуального подтверждённого значения для помещения."
@@ -66,12 +84,38 @@ def check_requirement(req, p):
         o for o in live if o.scope == "premises" and o.source_type != "archive"
     ]
     values = {
-        (o.value if req.operator != "eq" else o.boolean, o.unit)
+        (
+            o.value
+            if kind == "number"
+            else o.boolean
+            if kind == "boolean"
+            else o.text.strip().casefold(),
+            o.unit,
+        )
         for o in comparable
-        if (o.value is not None if req.operator != "eq" else o.boolean is not None)
+        if (
+            o.value is not None
+            if kind == "number"
+            else o.boolean is not None
+            if kind == "boolean"
+            else bool(o.text.strip())
+        )
     }
     conflict = any(o.status == "conflict" for o in live) or len(values) > 1
-    if conflict:
+    invalid_rule = (
+        req.operator not in req.characteristic.allowed_operators
+        or (kind == "text" and not req.expected_text)
+        or (
+            kind == "number"
+            and (
+                req.minimum is None or (req.operator == "range" and req.maximum is None)
+            )
+        )
+        or req.unit != req.characteristic.unit
+    )
+    if invalid_rule:
+        reason = "Уточните тип, единицу или значение требования в профиле. Прежние сведения сохранены без автоматического толкования."
+    elif conflict:
         reason = "Источники противоречат друг другу. Выберите актуальный источник и запишите основание."
     else:
         confirmed = [
@@ -80,16 +124,27 @@ def check_requirement(req, p):
             if o.status == "confirmed"
             and o.source_type != "listing"
             and o.confirmation
-            and o.unit == req.unit
-            and (o.value is not None if req.operator != "eq" else o.boolean is not None)
+            and o.unit == req.unit == req.characteristic.unit
+            and (
+                o.value is not None
+                if kind == "number"
+                else o.boolean is not None
+                if kind == "boolean"
+                else bool(o.text.strip())
+            )
         ]
         if confirmed:
             o = confirmed[-1]
             good = (
                 (o.boolean == req.expected)
-                if req.operator == "eq"
+                if kind == "boolean"
+                else normalized_text(req.characteristic.code, o.text)
+                == normalized_text(req.characteristic.code, req.expected_text)
+                if kind == "text"
                 else (
-                    o.value >= req.minimum
+                    o.value == req.minimum
+                    if req.operator == "eq"
+                    else o.value >= req.minimum
                     if req.operator == "gte"
                     else o.value <= req.minimum
                     if req.operator == "lte"
@@ -119,10 +174,13 @@ def check_requirement(req, p):
     )
     return {
         "requirement": str(req),
+        "requirement_id": req.pk,
         "name": req.name,
         "priority": req.priority,
         "status": status,
         "label": ROW_LABELS[status],
+        "characteristic_id": req.characteristic_id,
+        "code": req.characteristic.code,
         "reason": reason,
         "question": question,
         "sources": sources,
@@ -134,7 +192,12 @@ def check_requirement(req, p):
     }
 
 
-def economics(p):
+def economics(p, request_obj=None):
+    context = (
+        RequestPremises.objects.filter(premises=p, request=request_obj).first()
+        if request_obj is not None
+        else None
+    )
     zero = Decimal("0")
     missing = []
     monthly = []
@@ -170,12 +233,16 @@ def economics(p):
     once = []
     once_missing = []
     for field in ["deposit", "commission", "adaptation", "other_once"]:
-        v = getattr(p, field)
-        once.append((p._meta.get_field(field).verbose_name, v))
+        holder = p if field in ["deposit", "commission"] else context
+        v = getattr(holder, field, None)
+        label_model = (
+            Premises if field in ["deposit", "commission"] else RequestPremises
+        )
+        once.append((label_model._meta.get_field(field).verbose_name, v))
         if v is None:
-            once_missing.append(str(p._meta.get_field(field).verbose_name))
+            once_missing.append(str(label_model._meta.get_field(field).verbose_name))
     once_total = sum((v for _, v in once if v is not None), zero)
-    budget = p.request.budget
+    budget = request_obj.budget if request_obj else None
     gap = total - budget if budget is not None else None
     budget_label = (
         "Лимит неизвестен"
@@ -218,12 +285,14 @@ def economics(p):
             "gap": gap,
             "budget_label": budget_label,
             "allowed_rent": allowed,
-            "stress_total": total + p.stress,
-            "stress_addition": p.stress,
-            "start_gap": once_total - p.request.start_budget
-            if p.request.start_budget is not None
+            "stress_total": total + (context.stress if context else zero),
+            "stress_addition": context.stress if context else zero,
+            "start_gap": once_total - request_obj.start_budget
+            if request_obj and request_obj.start_budget is not None
             else None,
-            "assumptions": p.assumptions,
+            "assumptions": "\n".join(
+                filter(None, [p.lease_terms, context.assumptions if context else ""])
+            ),
             "commercial_evidence": {
                 "source": p.commercial_source
                 or "Источник не указан — расчёт по ручным вводным",
@@ -240,12 +309,24 @@ def economics(p):
     )
 
 
-def evaluate(p, user):
-    if not p.request.ready:
+@transaction.atomic
+def evaluate(p, user, request_obj):
+    from django.core.exceptions import PermissionDenied
+
+    req = ClientRequest.objects.select_for_update().get(pk=request_obj.pk)
+    p = Premises.objects.select_for_update().get(pk=p.pk)
+    if req.owner_id != user.pk or req.agency_id != p.agency_id:
+        raise PermissionDenied("Проверка недоступна.")
+    context = RequestPremises.objects.filter(request=req, premises=p).first()
+    if not context:
+        raise ValueError("Помещение не добавлено в этот запрос.")
+    if not req.ready:
         raise ValueError("Задайте хотя бы одно обязательное требование в профиле.")
     rows = [
         check_requirement(r, p)
-        for r in p.request.requirements.exclude(priority="na").order_by("id")
+        for r in req.requirements.exclude(priority="na")
+        .select_related("characteristic")
+        .order_by("id")
     ]
     mandatory = [r for r in rows if r["priority"] == "required"]
     status = (
@@ -259,9 +340,9 @@ def evaluate(p, user):
         "status": status,
         "label": LABELS[status],
         "rows": rows,
-        "economics": economics(p),
+        "economics": economics(p, req),
     }
-    latest = p.evaluations.order_by("-id").first()
+    latest = p.evaluations.filter(request=req).order_by("-id").first()
     if (
         latest
         and latest.current
@@ -271,18 +352,21 @@ def evaluate(p, user):
         return latest
     ev = Evaluation.objects.create(
         premises=p,
-        profile_version=p.request.version,
+        request=req,
+        link_identity=context.pk,
+        context_version=context.version,
+        profile_version=req.version,
         premises_version=p.version,
         result=result,
         author=user,
         rules_version=RULES_VERSION,
     )
-    audit(user, "check.completed", p.pk)
+    audit(user, "check.completed", ev.pk)
     return ev
 
 
-def current_evaluation(p):
-    ev = p.evaluations.order_by("-id").first()
+def current_evaluation(p, request_obj):
+    ev = p.evaluations.filter(request=request_obj).order_by("-id").first()
     return ev if ev and ev.current and ev.rules_version == RULES_VERSION else None
 
 
@@ -304,11 +388,11 @@ def report_snapshot(req, objects, comment, parameters=None):
         if parameters is None
         else set(parameters) & set(dict(report_parameter_choices(req)))
     )
-    mandatory_names = set(
-        req.requirements.filter(priority="required").values_list("name", flat=True)
+    mandatory_ids = set(
+        req.requirements.filter(priority="required").values_list("id", flat=True)
     )
-    wanted_names = mandatory_names | {
-        r.name
+    wanted_ids = mandatory_ids | {
+        r.pk
         for r in req.requirements.filter(priority="desired")
         if f"requirement:{r.pk}" in selected_parameters
     }
@@ -323,7 +407,7 @@ def report_snapshot(req, objects, comment, parameters=None):
                 "Выбранные варианты должны иметь разные однозначные метки. Уточните этаж / номер."
             )
         identifiers.append(identifier.casefold())
-        ev = current_evaluation(p)
+        ev = current_evaluation(p, req)
         if not ev:
             raise ValueError(
                 f"{p.label}: оценка устарела или отсутствует. Пересчитайте перед выпуском PDF."
@@ -343,7 +427,9 @@ def report_snapshot(req, objects, comment, parameters=None):
                 "decision": decision,
                 **ev.result,
                 "rows": [
-                    row for row in ev.result["rows"] if row["name"] in wanted_names
+                    row
+                    for row in ev.result["rows"]
+                    if row["requirement_id"] in wanted_ids
                 ],
             }
         )
@@ -372,13 +458,24 @@ def report_snapshot(req, objects, comment, parameters=None):
 @transaction.atomic
 def issue_report(req, objects, comment, user, key, parameters=None):
     req = ClientRequest.objects.select_for_update().get(pk=req.pk)
+    from django.core.exceptions import PermissionDenied
+
+    if req.owner_id != user.pk:
+        raise PermissionDenied
     if req.archived or req.stage == "done":
         raise ValueError("Верните запрос в работу перед выпуском отчёта.")
     old = Report.objects.filter(creation_key=key, request=req).first()
     if old:
         return old
     # All mutations lock the same parent request, preventing mixed-version snapshots.
-    objects = list(req.premises.filter(pk__in=[p.pk for p in objects]).order_by("id"))
+    requested_ids = {p.pk for p in objects}
+    objects = list(
+        Premises.objects.select_for_update()
+        .filter(requests=req, agency_id=req.agency_id, pk__in=requested_ids)
+        .order_by("id")
+    )
+    if len(objects) != len(requested_ids):
+        raise ValueError("Не все помещения добавлены в этот запрос.")
     if not 1 <= len(objects) <= 4:
         raise ValueError("Выберите от 1 до 4 вариантов.")
     snap = report_snapshot(req, objects, comment, parameters=parameters)
@@ -413,12 +510,14 @@ def issue_report(req, objects, comment, user, key, parameters=None):
     return report
 
 
-def compare_rows(objects, differences=False):
+def compare_rows(objects, differences=False, request_obj=None):
+    if request_obj is None:
+        raise ValueError("Укажите клиентский запрос.")
     # A missing evaluation is never presented as a current recommendation.
-    evaluations = [current_evaluation(p) for p in objects]
+    evaluations = [current_evaluation(p, request_obj) for p in objects]
     rows = []
     for i, req in (
-        enumerate(objects[0].request.requirements.exclude(priority="na").order_by("id"))
+        enumerate(request_obj.requirements.exclude(priority="na").order_by("id"))
         if objects
         else []
     ):
@@ -426,7 +525,10 @@ def compare_rows(objects, differences=False):
         critical = False
         for ev in evaluations:
             cell = (
-                next((r for r in ev.result["rows"] if r["name"] == req.name), None)
+                next(
+                    (r for r in ev.result["rows"] if r.get("requirement_id") == req.pk),
+                    None,
+                )
                 if ev
                 else None
             )
@@ -446,5 +548,5 @@ def compare_rows(objects, differences=False):
                 critical = True
         sigs = [(c["status"], c["value"]) for c in cells]
         if not differences or critical or len(set(sigs)) > 1:
-            rows.append({"name": str(req), "cells": cells})
+            rows.append({"name": str(req), "cells": cells, "requirement_id": req.pk})
     return rows

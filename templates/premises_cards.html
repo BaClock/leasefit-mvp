@@ -1,29 +1,29 @@
 {% load leasefit_tags %}
 <div class="request-grid">
   {% for card in cards %}
-    <a class="request-card"
-       href="{% url 'premises' card.p.request_id card.p.pk %}">
+    <article class="request-card">
       <div class="card-top">
-        <span class="icon-box">⌂</span>
-        <span class="pill {% if card.ev %}{{ card.ev.result.status }}{% else %}neutral{% endif %}">{% if card.ev %}{{ card.ev.result.label }}{% else %}○ Не проверено{% endif %}</span>
-      </div>
-      <h2>{{ card.p.label }}</h2>
-      <p>{{ card.p.request.city }} · {{ card.p.request.title }}{% if card.p.request.archived %} · Архив{% endif %}</p>
-      <p>Этаж {{ card.p.floor|default:'неизвестен' }} · {{ card.p.number|default:'номер не задан' }}</p>
+        <span class="pill neutral">{{ card.p.get_premises_type_display }}</span>{% if card.ev %}<span class="pill {{ card.ev.result.status }}">{{ card.ev.result.label }}</span>{% endif %}</div>
+      <h2>
+        <a href="{% if req %}
+{% url 'premises' req.pk card.p.pk %}
+{% else %}
+{% url 'catalog_premises' card.p.pk %}
+{% endif %}">{{ card.p.label }}</a>
+      </h2>
+      <p>Площадь: {{ card.p.area|default_if_none:'неизвестно' }} м² · Этаж: {{ card.p.floor|default:'не указан' }}</p>
       <div class="card-stats">
         <div>
           <small>{% if card.economics.complete %}НАГРУЗКА В МЕСЯЦ{% else %}ИЗВЕСТНЫЙ ПОДЫТОГ{% endif %}</small>
           <strong>{{ card.economics.monthly_total|rub }}</strong>
         </div>
-      </div>
-      <p class="{% if card.economics.gap|positive %}budget-over{% else %}muted{% endif %}">{{ card.economics.budget_label }}</p>
-      <div class="card-bottom">
-        {{ card.p.observations.count }} сведений<span>Открыть карточку →</span>
-      </div>
-    </a>{% empty %}
-    <div class="empty">
-      <h2>Помещений пока нет</h2>
-      <p>Добавьте вариант по адресу или рабочей метке.</p>
-    </div>
-  {% endfor %}
+      </div>{% if req %}<p>{{ card.economics.budget_label }}</p>{% if can_edit %}<form method="post" action="{% url 'detach_premises' req.pk card.p.pk %}">{% csrf_token %}<button class="link-button"
+                                                                                                                                                                                   data-confirm="Убрать только связь с запросом? Общая карточка и история сохранятся.">Убрать из запроса</button>
+      </form>
+  {% endif %}
+{% else %}<p class="muted">Общая карточка агентства · {{ card.p.request_links.count }} связей с запросами</p>{% endif %}</article>{% empty %}<div class="empty">
+<h2>Помещений пока нет</h2>
+<p>Создайте самостоятельную карточку или выберите ранее добавленный вариант из каталога.</p>
+</div>
+{% endfor %}
 </div>

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load leasefit_tags %}
+{% block content %}
+  {% include "request_header.html" %}<h2>Выбрать из каталога</h2>{% include "catalog_filters.html" %}<form method="post">{% csrf_token %}{{ selection_form.errors }}<div class="request-grid">{% for card in cards %}<article class="request-card">
+  <h3>{{ card.p.label }}</h3>
+  <p>{{ card.p.area|default_if_none:'неизвестно' }} м² · {{ card.economics.base|rub }}/мес.</p>{% if card.p.pk in attached_ids %}<span class="pill neutral">Уже в запросе</span>{% else %}<label class="inline">
+    <input type="checkbox" name="objects" value="{{ card.p.pk }}"> Добавить этот вариант</label>{% endif %}<p>
+    <a href="{% url 'catalog_premises' card.p.pk %}">Открыть общую карточку ↗</a>
+  </p>
+  </article>{% empty %}<p>По выбранным фильтрам помещений нет.</p>{% endfor %}</div>
+<div class="actions">
+  <button>Добавить выбранные без копирования</button>
+  <a href="{% url 'objects' req.pk %}">← Вернуться к запросу</a>
+</div>
+</form>
+{% endblock %}

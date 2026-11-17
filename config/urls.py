@@ -44,6 +44,43 @@ urlpatterns = [
     path("example", v.example, name="example"),
     path("app/premises", v.all_premises, name="all_premises"),
     path("app/premises/new", v.start_premises, name="start_premises"),
+    path("app/premises/<int:object_id>", v.premises_edit, name="catalog_premises"),
+    path(
+        "app/premises/<int:object_id>/observations",
+        v.add_observation,
+        name="catalog_observation",
+    ),
+    path(
+        "app/premises/<int:object_id>/observations/<int:observation_id>/resolve",
+        v.resolve,
+        name="catalog_resolve",
+    ),
+    path("app/premises/<int:object_id>/upload", v.upload, name="catalog_upload"),
+    path(
+        "app/premises/<int:object_id>/characteristics",
+        v.custom_characteristic,
+        name="custom_characteristic",
+    ),
+    path(
+        "app/requests/<int:pk>/objects/select",
+        v.select_premises,
+        name="select_premises",
+    ),
+    path(
+        "app/requests/<int:pk>/objects/<int:object_id>/detach",
+        v.detach_premises,
+        name="detach_premises",
+    ),
+    path(
+        "app/requests/<int:pk>/objects/<int:object_id>/context",
+        v.request_context,
+        name="request_context",
+    ),
+    path(
+        "app/requests/<int:pk>/template",
+        v.apply_business_template,
+        name="business_template",
+    ),
     path("app/parser", v.parser_preview, name="parser"),
     path("app/requests/<int:pk>/refine", v.refine, name="refine"),
     path("app/requests", v.requests_list, name="requests"),
