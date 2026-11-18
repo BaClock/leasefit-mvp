@@ -52,6 +52,34 @@
                 {% else %}
                   <span class="ranking-meta">Недостаточно данных</span>
                 {% endif %}
+                {% if card.improvements %}
+                  <details class="ranking-improvements">
+                    <summary>Что повысит балл</summary>
+                    <ul>
+                      {% for item in card.improvements %}
+                        <li>
+                          {% if item.gain %}<span class="ranking-gain">+{{ item.gain }}</span>{% endif %}
+                          {% if item.budget %}
+                            {% if can_edit %}
+                              <a href="{% url 'premises' req.pk card.p.pk %}?edit=commercial#commercial-terms">Месячный бюджет</a>
+                            {% else %}
+                              Месячный бюджет
+                            {% endif %}
+                            <span class="ranking-meta">{{ card.budget_action }}</span>
+                          {% else %}
+                            {% if can_edit %}
+                              <a href="{% url 'premises' req.pk card.p.pk %}?characteristic={{ item.code|urlencode }}#evidence-form">{{ item.requirements|join:" · " }}</a>
+                            {% else %}
+                              {{ item.requirements|join:" · " }}
+                            {% endif %}
+                            <span class="ranking-meta">{% if item.needs_changes %}Устраните несоответствие и подтвердите новое значение.{% else %}Уточните фактические данные и подтвердите соответствие.{% endif %}</span>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                    {% if card.score is not None %}<p class="ranking-meta">Прирост по каждому пункту рассчитан от текущего балла.</p>{% endif %}
+                  </details>
+                {% endif %}
               </td>
               <td role="cell">
                 <span class="ranking-mobile-label" aria-hidden="true">Статус и риски</span>

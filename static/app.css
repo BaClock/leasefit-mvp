@@ -1448,20 +1448,29 @@ button.secondary {
 .ranking-mobile-label {
   display: none;
 }
-.ranking-risks {
+.ranking-risks,
+.ranking-improvements {
   margin-top: 8px;
   font-size: 13px;
 }
-.ranking-risks ul {
+.ranking-risks ul,
+.ranking-improvements ul {
   padding-left: 18px;
   margin: 10px 0 0;
 }
-.ranking-risks li + li {
+.ranking-risks li + li,
+.ranking-improvements li + li {
   margin-top: 7px;
 }
 .ranking-risks li span {
   display: block;
   color: var(--muted);
+}
+.ranking-gain {
+  display: inline-block;
+  margin-right: 4px;
+  color: #16633f;
+  font-weight: 700;
 }
 .ranking-note,
 .ranking-method {
@@ -1512,6 +1521,7 @@ button.secondary {
     padding: 0;
   }
   .ranking-table tbody th,
+  .ranking-table tr:has(.ranking-improvements[open]) .ranking-score,
   .ranking-table tr:has(.ranking-risks[open]) td:last-child {
     grid-column: 1 / -1;
   }

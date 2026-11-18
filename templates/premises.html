@@ -31,7 +31,7 @@
           <p class="hint">Площадь здесь используется для цены и фильтров. Для подтверждения технического соответствия запишите характеристику «Площадь» с источником ниже.</p>
         </section>
         <section class="panel">
-          <details {% if form.errors %}open{% endif %}>
+          <details id="commercial-terms" {% if form.errors or request.GET.edit == "commercial" %}open{% endif %}>
             <summary>Коммерческие условия и источники</summary>
             <p>Все суммы в ₽. Пусто — неизвестно, 0 — отсутствие платежа. Допущения конкретного клиента задаются отдельно в запросе.</p>{{ form.non_field_errors }}{% for field in form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}<div class="form-grid">{% for field in form.visible_fields %}
               {% if field.name != "label" and field.name != "premises_type" and field.name != "floor" and field.name != "number" and field.name != "listing_url" and field.name != "area" and field.name != "confirm_shared" %}

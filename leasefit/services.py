@@ -336,28 +336,48 @@ def assess_requirements(p, requirements, observations):
     return status, rows
 
 
-def suitability_score(rows, budget_met):
-    if not any(row["priority"] == "required" for row in rows) or all(
-        row["status"] == "clarify" for row in rows
-    ):
-        return None
-    criteria = {}
+def suitability_rating(rows, budget_met):
+    if not any(row["priority"] == "required" for row in rows):
+        return None, []
+    characteristics = defaultdict(list)
     for row in rows:
-        characteristic = row["characteristic_id"]
-        weight = 3 if row["priority"] == "required" else 1
-        met = row["status"] == "pass"
-        previous = criteria.get(characteristic)
-        if previous is None or weight > previous[0]:
-            criteria[characteristic] = (weight, met)
-        elif weight == previous[0]:
-            criteria[characteristic] = (weight, previous[1] and met)
+        characteristics[row["characteristic_id"]].append(row)
 
-    possible = sum(weight for weight, _ in criteria.values())
-    earned = sum(weight for weight, met in criteria.values() if met)
+    possible = earned = 0
+    improvements = []
+    for group in characteristics.values():
+        required = [row for row in group if row["priority"] == "required"]
+        weight = 3 if required else 1
+        missing = [row for row in (required or group) if row["status"] != "pass"]
+        possible += weight
+        if missing:
+            improvements.append(
+                {
+                    "weight": weight,
+                    "requirements": [row["requirement"] for row in missing],
+                    "code": missing[0]["code"],
+                    "needs_changes": any(row["status"] != "clarify" for row in missing),
+                }
+            )
+        else:
+            earned += weight
     if budget_met is not None:
         possible += 2
-        earned += 2 if budget_met else 0
-    return (100 * earned + possible // 2) // possible
+        if budget_met:
+            earned += 2
+        else:
+            improvements.append({"weight": 2, "budget": True})
+
+    def scale(points):
+        return (100 * points + possible // 2) // possible
+
+    score = scale(earned) if any(row["status"] != "clarify" for row in rows) else None
+    for item in improvements:
+        item["gain"] = (
+            scale(earned + item["weight"]) - score if score is not None else None
+        )
+    improvements.sort(key=lambda item: -item["weight"])
+    return score, improvements
 
 
 def rank_premises(req):
@@ -391,7 +411,7 @@ def rank_premises(req):
             for row in rows
             if row["status"] != "pass"
         ]
-        budget_met = None
+        budget_met = budget_action = None
         if req.budget is not None:
             over_budget = Decimal(costs["gap"]) > 0 and not costs["rent_conflict"]
             budget_met = costs["complete"] and not over_budget
@@ -403,11 +423,21 @@ def rank_premises(req):
                         "reason": ", ".join(costs["missing"]),
                     }
                 )
+                if costs["complete"]:
+                    budget_action = f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
+                else:
+                    budget_action = "Уточните полную месячную нагрузку."
+                    if over_budget:
+                        budget_action += " Известные расходы уже превышают лимит."
+                budget_action += f" Цель — до {money_text(req.budget)} в месяц."
+        score, improvements = suitability_rating(rows, budget_met)
         cards.append(
             {
                 "p": p,
                 "status": status,
-                "score": suitability_score(rows, budget_met),
+                "score": score,
+                "improvements": improvements,
+                "budget_action": budget_action,
                 "economics": costs,
                 "risks": risks,
             }

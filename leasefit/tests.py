@@ -174,7 +174,7 @@ class AcceptanceTests(TestCase):
         self.observe(p=unknown)
         self.assertEqual(self.client.get(url).context["cards"][1]["p"], unknown)
 
-    def test_suitability_score_counts_each_characteristic_once(self):
+    def test_suitability_rating_counts_each_characteristic_once(self):
         rows = [
             {"characteristic_id": 1, "priority": "required", "status": "pass"},
             {"characteristic_id": 1, "priority": "required", "status": "blocker"},
@@ -182,11 +182,51 @@ class AcceptanceTests(TestCase):
             {"characteristic_id": 2, "priority": "desired", "status": "pass"},
             {"characteristic_id": 3, "priority": "desired", "status": "clarify"},
         ]
-        self.assertEqual(suitability_score(rows, True), 43)
-        self.assertEqual(suitability_score(rows, None), 20)
-        self.assertEqual(suitability_score(rows[:2], None), 0)
-        self.assertIsNone(suitability_score(rows[2:], True))
-        self.assertIsNone(suitability_score([{**rows[0], "status": "clarify"}], True))
+        for index, row in enumerate(rows):
+            row["code"] = str(row["characteristic_id"])
+            row["requirement"] = f"Условие {index}"
+        score, improvements = suitability_rating(rows, True)
+        self.assertEqual(score, 43)
+        self.assertEqual(
+            [(item["requirements"], item["gain"]) for item in improvements],
+            [(["Условие 1"], 43), (["Условие 4"], 14)],
+        )
+        self.assertEqual(suitability_rating(rows, None)[0], 20)
+        self.assertEqual(suitability_rating(rows[:2], None)[0], 0)
+        self.assertEqual(suitability_rating(rows[2:], True), (None, []))
+        score, improvements = suitability_rating([{**rows[0], "status": "clarify"}], True)
+        self.assertIsNone(score)
+        self.assertIsNone(improvements[0]["gain"])
+
+    def test_ranking_shows_exact_gains_and_links_to_editable_fields(self):
+        self.observe()
+        Requirement.objects.create(
+            request=self.req, name="Отдельная вытяжка", operator="eq", expected=True
+        )
+        self.observe(name="Отдельная вытяжка", value=None, boolean=True, unit="")
+        for name in ["Водоснабжение", "Канализация", "Вентиляция"]:
+            Requirement.objects.create(
+                request=self.req, name=name, operator="eq", expected=True, priority="desired"
+            )
+        url = reverse("objects", args=[self.req.pk])
+        response = self.client.get(url)
+        card = response.context["cards"][0]
+        self.assertEqual(card["score"], 55)
+        self.assertEqual([item["gain"] for item in card["improvements"]], [18, 9, 9, 9])
+        self.assertContains(response, "Что повысит балл")
+        self.assertContains(response, "Снизьте расходы на 3 000 ₽ в месяц.")
+        self.assertContains(response, "Цель — до 70 000 ₽ в месяц.")
+        self.assertContains(response, "?characteristic=water_supply#evidence-form")
+        self.assertContains(response, "?edit=commercial#commercial-terms")
+        premises_url = reverse("premises", args=[self.req.pk, self.p.pk])
+        self.assertContains(
+            self.client.get(premises_url + "?edit=commercial"),
+            '<details id="commercial-terms" open>',
+        )
+        self.observe(name="Водоснабжение", value=None, boolean=True, unit="")
+        revised = self.client.get(url).context["cards"][0]
+        self.assertEqual(revised["score"], 64)
+        self.assertNotIn("water_supply", [item.get("code") for item in revised["improvements"]])
 
     def test_listing_cannot_confirm_even_if_imported_as_confirmed(self):
         self.observe(source_type="listing")

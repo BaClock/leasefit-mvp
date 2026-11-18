@@ -138,7 +138,12 @@ with sync_playwright() as pw:
     low_power = ranked_rows.filter(has_text=f"Общий вариант Б {tag}")
     low_power.get_by_text("Причины и риски").click()
     expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
+    low_power.get_by_text("Что повысит балл").click()
+    expect(low_power.get_by_text("Снизьте расходы на 3 000 ₽ в месяц.", exact=False)).to_be_visible()
     capture("ranking")
+    low_power.get_by_role("link", name="Месячный бюджет").click()
+    expect(page.locator("#commercial-terms")).to_have_attribute("open", "")
+    page.go_back()
 
     page.get_by_role("link", name="Создать новое помещение").click()
     page.locator("#id_label").fill(f"Ручной вариант {tag}")
