@@ -274,15 +274,16 @@ def delete_request(request, pk):
 @require_GET
 def objects(request, pk):
     obj = load_request(request, pk)
-    cards = []
-    for p in obj.premises.all().order_by("id"):
-        cards.append(
-            {"p": p, "ev": current_evaluation(p, obj), "economics": economics(p, obj)}
-        )
+    cards, ranking_ready = rank_premises(obj)
     return render(
         request,
         "objects.html",
-        {**tabs_context(request, obj, "objects"), "cards": cards},
+        {
+            **tabs_context(request, obj, "objects"),
+            "cards": cards,
+            "ranking_ready": ranking_ready,
+            "compare_url": comparison_url(obj, [card["p"] for card in cards[:4]]),
+        },
     )
 
 
@@ -920,17 +921,19 @@ def compare(request, pk):
     )
 
 
-def comparison_redirect(obj, selected, differences=False, anchor=""):
+def comparison_url(obj, selected, differences=False):
     from urllib.parse import urlencode
 
-    url = (
-        reverse("compare", args=[obj.pk])
-        + "?"
-        + urlencode(
-            [("objects", p.pk) for p in selected]
-            + ([("differences", "1")] if differences else [])
-        )
+    url = reverse("compare", args=[obj.pk])
+    query = urlencode(
+        [("objects", p.pk) for p in selected]
+        + ([("differences", "1")] if differences else [])
     )
+    return f"{url}?{query}" if query else url
+
+
+def comparison_redirect(obj, selected, differences=False, anchor=""):
+    url = comparison_url(obj, selected, differences)
     return redirect(url + ("#" + anchor if anchor else ""))
 
 

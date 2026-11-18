@@ -1,6 +1,8 @@
 import hashlib, json
+from collections import defaultdict
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from .models import *
 
@@ -71,10 +73,11 @@ def normalized_text(code, value):
     return value
 
 
-def check_requirement(req, p):
-    observations = list(
-        p.observations.filter(characteristic_id=req.characteristic_id).order_by("id")
-    )
+def check_requirement(req, p, *, observations=None):
+    if observations is None:
+        observations = list(
+            p.observations.filter(characteristic_id=req.characteristic_id).order_by("id")
+        )
     kind = req.characteristic.value_type
     live = [o for o in observations if not o.superseded]
     sources = [source_snapshot(o) for o in observations]
@@ -192,12 +195,9 @@ def check_requirement(req, p):
     }
 
 
-def economics(p, request_obj=None):
-    context = (
-        RequestPremises.objects.filter(premises=p, request=request_obj).first()
-        if request_obj is not None
-        else None
-    )
+def economics(p, request_obj=None, *, context=None):
+    if context is None and request_obj is not None:
+        context = RequestPremises.objects.filter(premises=p, request=request_obj).first()
     zero = Decimal("0")
     missing = []
     monthly = []
@@ -309,6 +309,120 @@ def economics(p, request_obj=None):
     )
 
 
+def active_requirements(req):
+    return (
+        req.requirements.exclude(priority="na")
+        .select_related("characteristic")
+        .order_by("id")
+    )
+
+
+def assess_requirements(p, requirements, observations):
+    by_characteristic = defaultdict(list)
+    for observation in observations:
+        by_characteristic[observation.characteristic_id].append(observation)
+    rows = [
+        check_requirement(r, p, observations=by_characteristic[r.characteristic_id])
+        for r in requirements
+    ]
+    mandatory = [r for r in rows if r["priority"] == "required"]
+    status = (
+        "blocker"
+        if any(r["status"] == "blocker" for r in mandatory)
+        else "clarify"
+        if not mandatory or any(r["status"] == "clarify" for r in mandatory)
+        else "pass"
+    )
+    return status, rows
+
+
+def suitability_score(rows, budget_met):
+    if not any(row["priority"] == "required" for row in rows) or all(
+        row["status"] == "clarify" for row in rows
+    ):
+        return None
+    criteria = {}
+    for row in rows:
+        characteristic = row["characteristic_id"]
+        weight = 3 if row["priority"] == "required" else 1
+        met = row["status"] == "pass"
+        previous = criteria.get(characteristic)
+        if previous is None or weight > previous[0]:
+            criteria[characteristic] = (weight, met)
+        elif weight == previous[0]:
+            criteria[characteristic] = (weight, previous[1] and met)
+
+    possible = sum(weight for weight, _ in criteria.values())
+    earned = sum(weight for weight, met in criteria.values() if met)
+    if budget_met is not None:
+        possible += 2
+        earned += 2 if budget_met else 0
+    return (100 * earned + possible // 2) // possible
+
+
+def rank_premises(req):
+    requirements = list(active_requirements(req))
+    ready = any(r.priority == "required" for r in requirements)
+    observations = Observation.objects.filter(
+        characteristic_id__in={r.characteristic_id for r in requirements}
+    ).order_by("id")
+    links = (
+        req.premises_links.filter(premises__agency_id=req.agency_id)
+        .select_related("premises")
+        .prefetch_related(
+            Prefetch(
+                "premises__observations",
+                queryset=observations,
+                to_attr="ranking_observations",
+            )
+        )
+    )
+    cards = []
+    for link in links:
+        p = link.premises
+        status, rows = assess_requirements(p, requirements, p.ranking_observations)
+        costs = economics(p, req, context=link)
+        risks = [
+            {
+                "title": row["requirement"],
+                "label": row["label"],
+                "reason": row["reason"] if row["status"] == "clarify" else row["value"],
+            }
+            for row in rows
+            if row["status"] != "pass"
+        ]
+        budget_met = None
+        if req.budget is not None:
+            over_budget = Decimal(costs["gap"]) > 0 and not costs["rent_conflict"]
+            budget_met = costs["complete"] and not over_budget
+            if not budget_met:
+                risks.append(
+                    {
+                        "title": "Месячный бюджет",
+                        "label": costs["budget_label"] if over_budget else "Требует уточнения",
+                        "reason": ", ".join(costs["missing"]),
+                    }
+                )
+        cards.append(
+            {
+                "p": p,
+                "status": status,
+                "score": suitability_score(rows, budget_met),
+                "economics": costs,
+                "risks": risks,
+            }
+        )
+    status_order = {"pass": 0, "clarify": 1, "blocker": 2}
+    cards.sort(
+        key=lambda card: (
+            status_order[card["status"]],
+            -(card["score"] if card["score"] is not None else -1),
+            card["p"].pk,
+        )
+    )
+    return cards, ready
+
+
 @transaction.atomic
 def evaluate(p, user, request_obj):
     from django.core.exceptions import PermissionDenied
@@ -320,27 +434,18 @@ def evaluate(p, user, request_obj):
     context = RequestPremises.objects.filter(request=req, premises=p).first()
     if not context:
         raise ValueError("Помещение не добавлено в этот запрос.")
-    if not req.ready:
+    requirements = list(active_requirements(req))
+    if not any(r.priority == "required" for r in requirements):
         raise ValueError("Задайте хотя бы одно обязательное требование в профиле.")
-    rows = [
-        check_requirement(r, p)
-        for r in req.requirements.exclude(priority="na")
-        .select_related("characteristic")
-        .order_by("id")
-    ]
-    mandatory = [r for r in rows if r["priority"] == "required"]
-    status = (
-        "blocker"
-        if any(r["status"] == "blocker" for r in mandatory)
-        else "clarify"
-        if any(r["status"] == "clarify" for r in mandatory)
-        else "pass"
-    )
+    observations = p.observations.filter(
+        characteristic_id__in={r.characteristic_id for r in requirements}
+    ).order_by("id")
+    status, rows = assess_requirements(p, requirements, observations)
     result = {
         "status": status,
         "label": LABELS[status],
         "rows": rows,
-        "economics": economics(p, req),
+        "economics": economics(p, req, context=context),
     }
     latest = p.evaluations.filter(request=req).order_by("-id").first()
     if (

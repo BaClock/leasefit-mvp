@@ -130,6 +130,25 @@ with sync_playwright() as pw:
     for p_id in ids:
         page.locator(f'input[name=objects][value="{p_id}"]').check()
     page.get_by_role("button", name="Добавить выбранные без копирования").click()
+    ranking = page.get_by_role("table", name="Топ помещений")
+    ranked_rows = ranking.locator("tbody tr")
+    expect(ranked_rows).to_have_count(2)
+    expect(ranked_rows.first).to_contain_text("Не соответствует")
+    expect(ranked_rows.first).to_contain_text("/ 100")
+    low_power = ranked_rows.filter(has_text=f"Общий вариант Б {tag}")
+    low_power.get_by_text("Причины и риски").click()
+    expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
+    capture("ranking")
+
+    page.get_by_role("link", name="Создать новое помещение").click()
+    page.locator("#id_label").fill(f"Ручной вариант {tag}")
+    page.get_by_role("button", name="Сохранить общую карточку").click()
+    page.wait_for_url(re.compile(r"/objects/\d+$"))
+    page.goto(base + f"/app/requests/{coffee}/objects")
+    manual_row = ranked_rows.filter(has_text=f"Ручной вариант {tag}")
+    expect(manual_row).to_contain_text("Недостаточно данных")
+    manual_row.get_by_role("button", name="Убрать из запроса").click()
+    expect(ranked_rows).to_have_count(2)
     page.goto(base + f"/app/requests/{coffee}/objects/{ids[0]}")
     form = page.locator(f'form[action$="/{ids[0]}/context"]')
     for key, value in {
@@ -191,5 +210,5 @@ with sync_playwright() as pw:
     context.close()
     browser.close()
 print(
-    "PASS: independent catalog creation → grouped requirements → shared use in coffee/PVZ with different results → common update and stale evaluations → unlink without deleting → unchanged issued PDF; 1440/768/390 px; no JS errors or page overflow."
+    "PASS: catalog and manual creation → ranked options and risks → grouped requirements → shared use in coffee/PVZ with different results → common update and stale evaluations → unlink without deleting → unchanged issued PDF; 1440/768/390 px; no JS errors or page overflow."
 )

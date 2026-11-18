@@ -5,6 +5,7 @@ from io import BytesIO
 from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 from django.utils import timezone
 from django.conf import settings
 from .models import *
@@ -121,6 +122,71 @@ class AcceptanceTests(TestCase):
     def test_exact_15_kw_passes(self):
         self.observe()
         self.assertEqual(self.result()["status"], "pass")
+
+    def test_premises_ranking_uses_current_evidence_budget_and_status_order(self):
+        self.observe()
+        affordable = {
+            "rent": 59000,
+            "operating": 0,
+            "utilities": 0,
+            "other_monthly": 0,
+            "vat_mode": "included",
+        }
+        confirmed = make_premises(
+            self.req, label="Подходит по профилю и бюджету", **affordable
+        )
+        unknown = make_premises(
+            self.req, label="Нужно подтвердить мощность", **affordable
+        )
+        blocked = make_premises(self.req, label="Мощности недостаточно", **affordable)
+        self.observe(p=confirmed)
+        self.observe(p=unknown, source_type="listing")
+        self.observe(p=blocked, value=12)
+        catalog_only = Premises.objects.create(agency=self.agency, label="Только в каталоге")
+        url = reverse("objects", args=[self.req.pk])
+        response = self.client.get(url)
+        self.assertEqual(
+            [
+                (card["p"].pk, card["status"], card["score"])
+                for card in response.context["cards"]
+            ],
+            [
+                (confirmed.pk, "pass", 100),
+                (self.p.pk, "pass", 60),
+                (unknown.pk, "clarify", None),
+                (blocked.pk, "blocker", 40),
+            ],
+        )
+        self.assertContains(response, "Причины и риски (1)")
+        self.assertContains(response, "Превышение 3 000 ₽")
+        self.assertContains(response, "12.00 кВт")
+        self.assertContains(response, "Выбрать из каталога")
+        self.assertContains(response, "Создать новое помещение")
+        self.assertNotContains(response, catalog_only.label)
+        self.assertTrue(
+            response.context["compare_url"].split("?")[1].startswith(
+                f"objects={confirmed.pk}&objects={self.p.pk}"
+            )
+        )
+        self.assertFalse(Evaluation.objects.filter(request=self.req).exists())
+
+        unknown.observations.update(superseded=True)
+        self.observe(p=unknown)
+        self.assertEqual(self.client.get(url).context["cards"][1]["p"], unknown)
+
+    def test_suitability_score_counts_each_characteristic_once(self):
+        rows = [
+            {"characteristic_id": 1, "priority": "required", "status": "pass"},
+            {"characteristic_id": 1, "priority": "required", "status": "blocker"},
+            {"characteristic_id": 1, "priority": "desired", "status": "pass"},
+            {"characteristic_id": 2, "priority": "desired", "status": "pass"},
+            {"characteristic_id": 3, "priority": "desired", "status": "clarify"},
+        ]
+        self.assertEqual(suitability_score(rows, True), 43)
+        self.assertEqual(suitability_score(rows, None), 20)
+        self.assertEqual(suitability_score(rows[:2], None), 0)
+        self.assertIsNone(suitability_score(rows[2:], True))
+        self.assertIsNone(suitability_score([{**rows[0], "status": "clarify"}], True))
 
     def test_listing_cannot_confirm_even_if_imported_as_confirmed(self):
         self.observe(source_type="listing")
