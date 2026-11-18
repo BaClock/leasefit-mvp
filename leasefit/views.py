@@ -8,12 +8,12 @@ from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import Http404, HttpResponse, FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST, require_GET
+from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.core.exceptions import PermissionDenied
 from .models import *
 from .forms import *
@@ -227,6 +227,50 @@ def lifecycle(request, pk):
 
 
 @workspace
+@require_http_methods(["GET", "POST"])
+@transaction.atomic
+def delete_request(request, pk):
+    deleting = request.method == "POST"
+    obj = load_request(request, pk, write=True, lock=deleting, working=False)
+    if deleting and (
+        check_version(request, obj)
+        and request.POST.get("selection_version") == str(obj.selection_version)
+    ):
+        legacy_files = obj.legacy_attachments.all()
+        if legacy_files.exists():
+            affected = Premises.objects.filter(pk__in=legacy_files.values("premises_id"))
+            list(affected.select_for_update().order_by("pk").values_list("pk", flat=True))
+            # These documents are private to the request even in the shared catalog.
+            Observation.objects.filter(document__in=legacy_files).update(document=None)
+            affected.update(version=F("version") + 1)
+            legacy_files.delete()
+        obj.evaluations.all().delete()
+        obj.reports.all().delete()
+        obj.delete()
+        audit(request.user, "request.deleted", pk)
+        request.session.pop(f"report-comment-{pk}", None)
+        messages.success(request, "Запрос удалён.")
+        return redirect("requests")
+    return render(
+        request,
+        "confirm_delete.html",
+        {
+            "section": "profile",
+            "title": "Удалить запрос",
+            "label": obj.title,
+            "description": (
+                "Удалятся требования, проверки, PDF и вложения этого запроса. "
+                "Общие карточки помещений останутся в каталоге."
+            ),
+            "version": obj.version,
+            "selection_version": obj.selection_version,
+            "cancel_url": reverse("profile", args=[pk]),
+        },
+        status=409 if deleting else 200,
+    )
+
+
+@workspace
 @require_GET
 def objects(request, pk):
     obj = load_request(request, pk)
@@ -244,6 +288,69 @@ def objects(request, pk):
 
 def catalog_scope(request):
     return Premises.objects.filter(agency=request.member.agency)
+
+
+@workspace
+@require_http_methods(["GET", "POST"])
+@transaction.atomic
+def delete_premises(request, object_id):
+    p = get_object_or_404(catalog_scope(request), pk=object_id)
+    deleting = request.method == "POST"
+    if deleting:
+        # Request edits, evaluations and report issuance lock requests before premises.
+        linked_requests = p.requests.order_by("pk").values_list("pk", flat=True)
+        locked_ids = set(
+            ClientRequest.objects.filter(pk__in=linked_requests)
+            .select_for_update()
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        p = get_object_or_404(catalog_scope(request).select_for_update(), pk=object_id)
+    links = list(p.request_links.order_by("pk").values_list("pk", "request_id"))
+    request_ids = {request_id for _, request_id in links}
+    link_version = hashlib.sha256(repr(links).encode()).hexdigest()
+    blocked = request.member.role != "manager" and (
+        p.requests.exclude(owner=request.user).exists()
+        or p.evaluations.exclude(request__owner=request.user).exists()
+        or p.attachments.filter(origin_request__isnull=False)
+        .exclude(origin_request__owner=request.user)
+        .exists()
+    )
+    if deleting and not blocked and (
+        request_ids <= locked_ids
+        and check_version(request, p)
+        and request.POST.get("selection_version") == link_version
+    ):
+        p.request_links.all().delete()
+        # Observations can protect the source documents stored on this premises.
+        p.observations.all().delete()
+        p.delete()
+        ClientRequest.objects.filter(pk__in=request_ids).update(
+            selection_version=F("selection_version") + 1
+        )
+        audit(request.user, "premises.deleted", object_id)
+        messages.success(request, "Помещение удалено из каталога и связанных запросов.")
+        return redirect("all_premises")
+    return render(
+        request,
+        "confirm_delete.html",
+        {
+            "section": "all_premises",
+            "title": "Удалить помещение",
+            "label": p.label,
+            "description": (
+                f"Карточка исчезнет из каталога и связанных запросов ({len(links)}). "
+                "Характеристики, проверки и вложения удалятся. Выпущенные PDF сохранятся."
+            ),
+            "blocked": "У помещения есть данные запросов коллег. Удалить его может руководитель."
+            if blocked
+            else "",
+            "version": p.version,
+            "selection_version": link_version,
+            "cancel_url": reverse("catalog_premises", args=[object_id]),
+        },
+        status=403 if blocked else 409 if deleting else 200,
+    )
 
 
 def available_files(request, p):
@@ -414,7 +521,12 @@ def premises_edit(request, pk=None, object_id=None):
             except (ValueError, TypeError, AttributeError):
                 key = None
             previous = (
-                catalog_scope(request).filter(creation_key=key).first() if key else None
+                    catalog_scope(request)
+                    .select_for_update()
+                    .filter(creation_key=key)
+                    .first()
+                    if key
+                    else None
             )
             if previous:
                 if req:
@@ -1049,7 +1161,7 @@ def healthz(request):
 
 
 def filtered_catalog(request):
-    from django.db.models import F, ExpressionWrapper, DecimalField
+    from django.db.models import ExpressionWrapper, DecimalField
     from django.db.models.functions import Coalesce
 
     form = CatalogFilterForm(request.GET)
@@ -1131,7 +1243,10 @@ def select_premises(request, pk):
 
     class AttachForm(forms.Form):
         objects = forms.ModelMultipleChoiceField(
-            label="Выберите помещения", queryset=catalog_scope(request)
+            label="Выберите помещения",
+            queryset=catalog_scope(request).select_for_update().order_by("pk")
+            if request.method == "POST"
+            else catalog_scope(request),
         )
 
         def clean_objects(self):

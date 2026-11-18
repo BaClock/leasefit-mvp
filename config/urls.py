@@ -46,6 +46,11 @@ urlpatterns = [
     path("app/premises/new", v.start_premises, name="start_premises"),
     path("app/premises/<int:object_id>", v.premises_edit, name="catalog_premises"),
     path(
+        "app/premises/<int:object_id>/delete",
+        v.delete_premises,
+        name="delete_premises",
+    ),
+    path(
         "app/premises/<int:object_id>/observations",
         v.add_observation,
         name="catalog_observation",
@@ -86,6 +91,7 @@ urlpatterns = [
     path("app/requests", v.requests_list, name="requests"),
     path("app/requests/new", v.profile, name="request_new"),
     path("app/requests/<int:pk>/profile", v.profile, name="profile"),
+    path("app/requests/<int:pk>/delete", v.delete_request, name="delete_request"),
     path("app/requests/<int:pk>/state", v.lifecycle, name="lifecycle"),
     path("app/requests/<int:pk>/objects", v.objects, name="objects"),
     path("app/requests/<int:pk>/objects/new", v.premises_edit, name="premises_new"),

@@ -21,7 +21,12 @@
                                                                                                                                                                                    data-confirm="Убрать только связь с запросом? Общая карточка и история сохранятся.">Убрать из запроса</button>
       </form>
   {% endif %}
-{% else %}<p class="muted">Общая карточка агентства · {{ card.p.request_links.count }} связей с запросами</p>{% endif %}</article>{% empty %}<div class="empty">
+{% else %}
+  <div class="card-bottom">
+    <span class="muted">Связей с запросами: {{ card.p.request_links.count }}</span>
+    <a href="{% url 'delete_premises' card.p.pk %}">Удалить помещение</a>
+  </div>
+{% endif %}</article>{% empty %}<div class="empty">
 <h2>Помещений пока нет</h2>
 <p>Создайте самостоятельную карточку или выберите ранее добавленный вариант из каталога.</p>
 </div>

@@ -3,10 +3,11 @@ import json
 import uuid
 from decimal import Decimal
 from io import BytesIO
-from django.test import TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.contrib.auth.models import User
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.urls import reverse
 from django.utils import timezone
 from pypdf import PdfReader
 from .models import (
@@ -20,6 +21,7 @@ from .models import (
     Observation,
     Evaluation,
     Attachment,
+    AuditEvent,
     Report,
 )
 from .forms import GroupedRequirementsForm, CustomRequirementsFormSet, ObservationForm
@@ -114,6 +116,115 @@ class SharedCatalogTests(TestCase):
 
     def setUp(self):
         self.client.force_login(self.owner)
+
+    def test_delete_premises_checks_permissions_and_preserves_issued_pdf(self):
+        url = reverse("delete_premises", args=[self.p.pk])
+        self.assertContains(self.client.get(url), "руководитель", status_code=403)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.peer)
+        self.peer.membership.role = "manager"
+        self.peer.membership.save(update_fields=["role"])
+
+        evaluate(self.p, self.owner, self.coffee)
+        report = issue_report(self.coffee, [self.p], "", self.owner, uuid.uuid4())
+        source = Attachment.objects.create(
+            premises=self.p,
+            filename="fact.pdf",
+            data=b"file",
+            content_type="application/pdf",
+            sha256="file",
+            author=self.owner,
+        )
+        self.o.document = source
+        self.o.save(update_fields=["document"])
+
+        confirmation = self.client.get(url)
+        self.assertContains(confirmation, self.p.label)
+        self.assertTrue(Premises.objects.filter(pk=self.p.pk).exists())
+        data = {
+            key: confirmation.context[key] for key in ("version", "selection_version")
+        }
+        self.assertRedirects(self.client.post(url, data), reverse("all_premises"))
+        self.assertEqual(self.client.post(url, data).status_code, 404)
+        self.assertFalse(Premises.objects.filter(pk=self.p.pk).exists())
+        self.assertFalse(RequestPremises.objects.filter(premises_id=self.p.pk).exists())
+        self.assertFalse(Evaluation.objects.filter(premises_id=self.p.pk).exists())
+        self.assertFalse(Attachment.objects.filter(pk=source.pk).exists())
+        self.assertEqual(bytes(Report.objects.get(pk=report.pk).pdf), bytes(report.pdf))
+        for req in [self.coffee, self.pickup]:
+            req.refresh_from_db()
+            self.assertEqual(req.selection_version, 2)
+        self.assertTrue(
+            AuditEvent.objects.filter(action="premises.deleted", actor=self.peer).exists()
+        )
+
+    def test_delete_unlinked_premises_rejects_stale_confirmation_and_requires_csrf(self):
+        p = Premises.objects.create(agency=self.agency, label="Свободная карточка")
+        url = reverse("delete_premises", args=[p.pk])
+        self.assertContains(self.client.get(reverse("all_premises")), url)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.owner)
+        confirmation = client.get(url)
+        data = {
+            key: confirmation.context[key] for key in ("version", "selection_version")
+        }
+        self.assertEqual(client.post(url, data).status_code, 403)
+        data["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
+        RequestPremises.objects.create(request=self.coffee, premises=p)
+        self.assertEqual(client.post(url, data).status_code, 409)
+        self.assertTrue(Premises.objects.filter(pk=p.pk).exists())
+        data["selection_version"] = client.get(url).context["selection_version"]
+        self.assertRedirects(client.post(url, data), reverse("all_premises"))
+
+    def test_delete_request_keeps_shared_premises_and_colleague_request(self):
+        url = reverse("delete_request", args=[self.coffee.pk])
+        self.peer.membership.role = "manager"
+        self.peer.membership.save(update_fields=["role"])
+        self.client.force_login(self.peer)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse("requests")), url)
+        self.assertContains(self.client.get(reverse("profile", args=[self.coffee.pk])), url)
+
+        evaluate(self.p, self.owner, self.coffee)
+        evaluate(self.p, self.peer, self.pickup)
+        report = issue_report(self.coffee, [self.p], "", self.owner, uuid.uuid4())
+        source = Attachment.objects.create(
+            premises=self.p,
+            origin_request=self.coffee,
+            filename="private.pdf",
+            data=b"file",
+            content_type="application/pdf",
+            sha256="file",
+            author=self.owner,
+        )
+        self.o.document = source
+        self.o.save(update_fields=["document"])
+        self.coffee.archived = True
+        self.coffee.save(update_fields=["archived"])
+
+        confirmation = self.client.get(url)
+        self.assertContains(confirmation, self.coffee.title)
+        self.assertTrue(ClientRequest.objects.filter(pk=self.coffee.pk).exists())
+        data = {
+            key: confirmation.context[key] for key in ("version", "selection_version")
+        }
+        self.assertRedirects(self.client.post(url, data), reverse("requests"))
+        self.assertFalse(ClientRequest.objects.filter(pk=self.coffee.pk).exists())
+        self.assertFalse(Report.objects.filter(pk=report.pk).exists())
+        self.assertFalse(Attachment.objects.filter(pk=source.pk).exists())
+        self.assertEqual(list(self.pickup.premises.all()), [self.p])
+        self.p.refresh_from_db()
+        self.assertEqual(self.p.evaluations.get().request_id, self.pickup.pk)
+        self.assertIsNone(current_evaluation(self.p, self.pickup))
+        self.o.refresh_from_db()
+        self.assertIsNone(self.o.document_id)
+        self.assertTrue(
+            AuditEvent.objects.filter(action="request.deleted", actor=self.owner).exists()
+        )
 
     def test_independent_creation_and_catalog_filters(self):
         data = {

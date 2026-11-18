@@ -11,6 +11,9 @@
         <h1>{% if new_object %}Новое помещение{% else %}{{ p.label }}{% endif %}</h1>
         <p>Характеристики объекта общие. Требования, выводы и заметки клиента принадлежат запросу.</p>
       </div>
+      {% if not req and not new_object %}
+        <a class="button secondary" href="{% url 'delete_premises' p.pk %}">Удалить помещение</a>
+      {% endif %}
     </div>
     {% if shared %}<div class="notice warning">Помещение используется в нескольких запросах ({{ use_count }}). Изменение общих характеристик потребует пересчёта связанных оценок. Перед сохранением подтвердите изменение.</div>{% endif %}
     <form method="post" class="dirty-form">

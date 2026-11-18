@@ -91,6 +91,9 @@
                   <form method="post" action="{% url 'lifecycle' req.pk %}">{% csrf_token %}<input type="hidden" name="version" value="{{ req.version }}">{% if req.archived %}<button name="action" value="restore" class="secondary">Восстановить из архива</button>{% else %}
                   {% if req.stage == "done" %}<button name="action" value="active">Вернуть в работу</button>{% else %}<button name="action" value="active" class="secondary">В работу</button>
                   <button name="action" value="done" class="secondary">Завершить подбор</button>{% endif %}<button name="action" value="archive" class="secondary">Архивировать</button>{% endif %}</form>
+                  <div class="actions">
+                    <a href="{% url 'delete_request' req.pk %}">Удалить запрос</a>
+                  </div>
           </section>
 {% endif %}
 {% endif %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block content %}
+  <section class="panel">
+    <h1>{{ title }}</h1>
+    <p><strong>{{ label }}</strong></p>
+    {% if blocked %}
+      <p class="notice warning">{{ blocked }}</p>
+      <a class="button secondary" href="{{ cancel_url }}">Вернуться</a>
+    {% else %}
+      {% if request.method == "POST" %}
+        <p class="notice warning" role="alert">Запись или её связи изменились. Проверьте актуальные данные перед удалением.</p>
+      {% endif %}
+      <p>{{ description }}</p>
+      <p>Действие нельзя отменить.</p>
+      <form method="post" class="actions">
+        {% csrf_token %}
+        <input type="hidden" name="version" value="{{ version|unlocalize }}">
+        <input type="hidden" name="selection_version" value="{{ selection_version|unlocalize }}">
+        <button class="danger">{{ title }}</button>
+        <a class="button secondary" href="{{ cancel_url }}">Отмена</a>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

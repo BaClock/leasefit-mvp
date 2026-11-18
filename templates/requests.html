@@ -45,12 +45,12 @@
   </div>
   <div class="request-grid">
     {% for req in requests %}
-      <a class="request-card" href="{% url 'profile' req.pk %}">
+      <article class="request-card">
         <div class="card-top">
           <span class="icon-box">⌂</span>
           <span class="pill neutral">{{ req.get_stage_display }}{% if req.archived %} · Архив{% endif %}</span>
         </div>
-        <h2>{{ req.title }}</h2>
+        <h2><a class="card-open" href="{% url 'profile' req.pk %}">{{ req.title }}</a></h2>
         <p>{{ req.city }} · {{ req.business }}</p>
         <div class="card-stats">
           <div>
@@ -62,9 +62,15 @@
             <strong>{{ req.object_count }}</strong>
           </div>
         </div>
-        <div class="card-bottom">{% if member.role == "manager" %}{{ req.owner.get_full_name|default:req.owner.username }} · {% endif %}{{ req.updated_at|date:'d.m.Y' }}<span>Открыть →</span>
+        <div class="card-bottom">
+          <div>{% if member.role == "manager" %}{{ req.owner.get_full_name|default:req.owner.username }} · {% endif %}{{ req.updated_at|date:'d.m.Y' }}</div>
+          {% if req.owner_id == request.user.pk %}
+            <a class="card-action" href="{% url 'delete_request' req.pk %}">Удалить запрос</a>
+          {% else %}
+            <span>Открыть →</span>
+          {% endif %}
         </div>
-      </a>{% empty %}
+      </article>{% empty %}
       <div class="empty">
         <span class="empty-icon">▦</span>
         <h2>{% if search %}Ничего не найдено по фильтрам{% else %}Создайте первый запрос{% endif %}</h2>

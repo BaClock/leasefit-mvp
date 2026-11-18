@@ -315,6 +315,7 @@ small,
   gap: 20px;
 }
 .request-card {
+  position: relative;
   display: block;
   color: var(--text);
   background: var(--card);
@@ -326,6 +327,14 @@ small,
 .request-card:hover {
   border-color: #5274a6;
   text-decoration: none;
+}
+.card-open::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+.card-action {
+  position: relative;
 }
 .request-card h2 {
   margin: 20px 0 7px;
