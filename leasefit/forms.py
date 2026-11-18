@@ -143,14 +143,14 @@ class ObservationForm(forms.ModelForm):
             "value",
             "boolean",
             "text",
+            "status",
+            "confirmation",
             "scope",
             "locator",
             "source_type",
             "source",
             "source_url",
             "observed_on",
-            "status",
-            "confirmation",
             "document",
         ]
         widgets = {
@@ -160,8 +160,14 @@ class ObservationForm(forms.ModelForm):
         labels = {
             "characteristic": "Характеристика",
             "value": "Число (единица фиксирована справочником)",
-            "boolean": "Фактическое наличие",
+            "boolean": "Значение характеристики (да / нет)",
             "text": "Текстовое значение",
+            "status": "Статус сведений",
+            "confirmation": "Основание подтверждения или выбора источника",
+        }
+        help_texts = {
+            "status": "Если значение неизвестно, выберите «Неизвестно». Для статуса «Подтверждено» укажите основание.",
+            "confirmation": "Например, номер документа или дата письменного ответа собственника.",
         }
 
     def __init__(self, *args, agency=None, premises=None, visible_files=None, **kwargs):
@@ -177,20 +183,23 @@ class ObservationForm(forms.ModelForm):
             visible_files if visible_files is not None else Attachment.objects.none()
         )
         self.fields["document"].label = "Подтверждающий документ из доступных вложений"
+        self.fields["boolean"].widget.choices = [
+            ("", "Выберите значение"),
+            ("true", "Да"),
+            ("false", "Нет"),
+        ]
 
     def clean(self):
         d = super().clean()
         char = d.get("characteristic")
+        status = d.get("status")
         if d.get("observed_on") and d["observed_on"] > timezone.localdate():
             self.add_error("observed_on", "Дата не может быть в будущем.")
         if char:
-            val = (
-                d.get("value")
-                if char.value_type == "number"
-                else d.get("boolean")
-                if char.value_type == "boolean"
-                else d.get("text")
-            )
+            value_field = {"number": "value", "boolean": "boolean", "text": "text"}[
+                char.value_type
+            ]
+            val = d.get(value_field)
             if char.value_type != "number" and d.get("value") is not None:
                 self.add_error(
                     "value",
@@ -205,14 +214,24 @@ class ObservationForm(forms.ModelForm):
                     "text",
                     "Используйте поле числа или наличия для этой характеристики.",
                 )
-            if d.get("status") != "unknown" and (val is None or val == ""):
-                self.add_error("status", "Укажите значение или выберите «Неизвестно».")
-            if d.get("status") == "unknown" and val is not None and val != "":
+            if (
+                status
+                and status != "unknown"
+                and value_field in d
+                and val in (None, "")
+            ):
+                self.add_error(
+                    value_field,
+                    "Выберите «Да» или «Нет»."
+                    if value_field == "boolean"
+                    else "Введите значение характеристики.",
+                )
+            if status == "unknown" and val not in (None, ""):
                 self.add_error(
                     "status",
                     "Для известного значения выберите «Не подтверждено» или подтверждение.",
                 )
-        if d.get("status") == "confirmed":
+        if status == "confirmed":
             if not d.get("confirmation"):
                 self.add_error("confirmation", "Укажите основание подтверждения.")
             if d.get("source_type") == "listing":

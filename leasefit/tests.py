@@ -228,6 +228,63 @@ class AcceptanceTests(TestCase):
         self.assertEqual(revised["score"], 64)
         self.assertNotIn("water_supply", [item.get("code") for item in revised["improvements"]])
 
+    def test_observation_confirmation_requires_a_value_in_the_matching_field(self):
+        url = reverse("observation_add", args=[self.req.pk, self.p.pk])
+        data = {
+            "scope": "premises",
+            "source_type": "owner",
+            "source": "Письмо собственника",
+            "observed_on": timezone.localdate(),
+            "status": "confirmed",
+            "version": self.p.version,
+            "creation_key": uuid.uuid4(),
+        }
+        for code, field, value in [
+            ("water_supply", "boolean", "false"),
+            ("power_kw", "value", "0"),
+            ("floor", "text", "1 этаж"),
+        ]:
+            with self.subTest(code=code):
+                characteristic = Characteristic.objects.get(code=code)
+                response = self.client.post(
+                    url, {**data, "characteristic": characteristic.pk}
+                )
+                self.assertEqual(response.status_code, 400)
+                errors = response.context["obsform"].errors
+                self.assertEqual(set(errors), {field, "confirmation"})
+                self.assertFalse(
+                    self.p.observations.filter(characteristic=characteristic).exists()
+                )
+                saved = self.client.post(
+                    url,
+                    {
+                        **data,
+                        "characteristic": characteristic.pk,
+                        field: value,
+                        "confirmation": "Проверено по письменному ответу",
+                    },
+                )
+                self.assertRedirects(
+                    saved, reverse("premises", args=[self.req.pk, self.p.pk])
+                )
+                observation = self.p.observations.get(characteristic=characteristic)
+                self.assertEqual(observation.status, "confirmed")
+                expected_value = {"boolean": False, "value": 0}.get(field, value)
+                self.assertEqual(getattr(observation, field), expected_value)
+                self.p.refresh_from_db()
+                data.update(version=self.p.version, creation_key=uuid.uuid4())
+
+        water = Characteristic.objects.get(code="water_supply")
+        self.assertEqual(
+            self.client.post(
+                url, {**data, "status": "unknown", "characteristic": water.pk}
+            ).status_code,
+            302,
+        )
+        self.assertIsNone(
+            self.p.observations.get(characteristic=water, status="unknown").boolean
+        )
+
     def test_listing_cannot_confirm_even_if_imported_as_confirmed(self):
         self.observe(source_type="listing")
         self.assertEqual(self.result()["status"], "clarify")

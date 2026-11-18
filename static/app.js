@@ -83,27 +83,33 @@ document.addEventListener("DOMContentLoaded", () => {
 document.addEventListener("DOMContentLoaded", () => {
   const select = document.querySelector("#evidence-form #id_characteristic");
   if (!select) return;
+  const form = select.form;
+  const status = form.elements.namedItem("status");
+  const confirmation = form.elements.namedItem("confirmation");
   const sync = () => {
     const option = select.selectedOptions[0],
       kind = option?.dataset.kind;
+    const valueRequired = status.value !== "" && status.value !== "unknown";
     for (const [id, type] of [
       ["value", "number"],
       ["boolean", "boolean"],
       ["text", "text"],
     ]) {
-      const input = document.querySelector("#evidence-form #id_" + id);
-      if (input) {
-        input.disabled = kind !== type;
-        input.closest(".field").hidden = kind !== type;
-      }
+      const input = form.elements.namedItem(id);
+      const active = kind === type;
+      input.disabled = !active;
+      input.required = active && valueRequired;
+      input.closest(".field").hidden = !active;
     }
-    const input = document.querySelector("#evidence-form #id_value");
-    if (input) {
-      const label = input.closest(".field").querySelector("label");
-      label.textContent =
-        "Значение" + (option?.dataset.unit ? ", " + option.dataset.unit : "");
-    }
+    confirmation.required = status.value === "confirmed";
+    const label = form.elements
+      .namedItem("value")
+      .closest(".field")
+      .querySelector("label");
+    label.textContent =
+      "Значение" + (option?.dataset.unit ? ", " + option.dataset.unit : "");
   };
   select.addEventListener("change", sync);
+  status.addEventListener("change", sync);
   sync();
 });

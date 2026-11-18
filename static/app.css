@@ -487,6 +487,9 @@ small,
   margin-bottom: 17px;
   min-width: 0;
 }
+#evidence-form .field[hidden] {
+  display: none;
+}
 .field label,
 label {
   font-size: 12px;
