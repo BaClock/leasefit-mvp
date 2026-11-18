@@ -17,7 +17,9 @@ from .operations import (
 from .metrics import financial_metrics, evidence_summary
 from .regulations import regulatory_checklist
 
-RULES_VERSION = "p0-3.0"
+RULES_VERSION = "p0-3.1"
+STATUS_ORDER = {"pass": 0, "clarify": 1, "blocker": 2}
+LOAD_LINK = object()
 LABELS = {
     "blocker": "Не соответствует · подтверждённый блокер",
     "clarify": "Требует уточнения",
@@ -315,11 +317,13 @@ def requirement_result(req, status, reason, sources, adjustment=""):
     }
 
 
-def economics(p, request_obj=None, *, context=None):
-    if context is None and request_obj is not None:
-        context = RequestPremises.objects.filter(
-            premises=p, request=request_obj
-        ).first()
+def economics(p, request_obj=None, *, context=LOAD_LINK):
+    if context is LOAD_LINK:
+        context = (
+            RequestPremises.objects.filter(premises=p, request=request_obj).first()
+            if request_obj is not None
+            else None
+        )
     zero = Decimal("0")
     missing = []
     monthly = []
@@ -334,6 +338,8 @@ def economics(p, request_obj=None, *, context=None):
         missing.append("Базовая аренда / площадь для ставки")
     if conflict:
         missing.append("Конфликт месячной аренды и ставки × площади")
+    if p.commercial_status == "conflict":
+        missing.append("Противоречивые коммерческие условия")
     monthly.append(("Базовая аренда", base))
     for field in ["operating", "utilities", "other_monthly"]:
         v = getattr(p, field)
@@ -366,19 +372,24 @@ def economics(p, request_obj=None, *, context=None):
     once_total = sum((v for _, v in once if v is not None), zero)
     budget = request_obj.budget if request_obj else None
     gap = total - budget if budget is not None else None
-    budget_label = (
-        "Лимит неизвестен"
-        if budget is None
-        else (
-            "Превышение " + money_text(gap)
-            if gap > 0
-            else (
-                "Известный подытог ниже лимита; итог не определён"
-                if missing
-                else "В пределах месячного лимита"
-            )
-        )
+    budget_met = monthly_budget_met(
+        p, gap, complete=not missing, rent_conflict=conflict
     )
+    if budget is None:
+        budget_label = "Лимит неизвестен"
+    elif budget_met is False:
+        budget_label = (
+            "Известные расходы выше лимита на " if missing else "Превышение "
+        ) + money_text(gap)
+    elif budget_met is True:
+        budget_label = "В пределах месячного лимита"
+    elif gap > 0 and not conflict and p.commercial_status != "conflict":
+        budget_label = (
+            f"Превышение возможно. По введённым суммам разница {money_text(gap)}. "
+            "Полная сумма требует уточнения"
+        )
+    else:
+        budget_label = "Полная сумма и соблюдение лимита требуют уточнения"
     others = [p.operating, p.utilities, p.other_monthly]
     allowed = None
     if (
@@ -409,11 +420,13 @@ def economics(p, request_obj=None, *, context=None):
             "gap": gap,
             "budget_label": budget_label,
             "allowed_rent": allowed,
-            "stress_total": total + (context.stress if context else zero),
-            "stress_addition": context.stress if context else zero,
+            "stress_total": total + context.stress if context else None,
+            "stress_addition": context.stress if context else None,
             "start_gap": (
                 once_total - request_obj.start_budget
-                if request_obj and request_obj.start_budget is not None
+                if context is not None
+                and request_obj
+                and request_obj.start_budget is not None
                 else None
             ),
             "assumptions": "\n".join(
@@ -432,6 +445,25 @@ def economics(p, request_obj=None, *, context=None):
                 "units": "₽; месяц; м²",
             },
         }
+    )
+
+
+def monthly_budget_met(p, gap, *, complete, rent_conflict):
+    if gap is None or rent_conflict or p.commercial_status == "conflict":
+        return None
+    if complete:
+        return Decimal(gap) <= 0
+    if Decimal(gap) > 0 and p.commercial_status == "confirmed":
+        return False  # A confirmed subtotal alone exceeds the limit.
+    return None
+
+
+def budget_result(p, costs):
+    return monthly_budget_met(
+        p,
+        costs["gap"],
+        complete=costs["complete"],
+        rent_conflict=costs["rent_conflict"],
     )
 
 
@@ -522,81 +554,88 @@ def suitability_rating(rows, budget_met):
     return score, improvements
 
 
-def rank_premises(req):
-    requirements = list(active_requirements(req))
-    ready = any(r.priority == "required" for r in requirements)
-    observations = Observation.objects.filter(
+def ranking_observations(requirements):
+    return Observation.objects.filter(
         characteristic_id__in={r.characteristic_id for r in requirements}
     ).order_by("id")
+
+
+def assess_premises(req, p, requirements, observations, *, context):
+    status, rows = assess_requirements(p, requirements, observations)
+    costs = economics(p, req, context=context)
+    risks = [
+        {
+            "title": row["requirement"],
+            "label": row["label"],
+            "reason": row["reason"] if row["status"] == "clarify" else row["value"],
+        }
+        for row in rows
+        if row["status"] != "pass"
+    ]
+    budget_met = budget_result(p, costs)
+    score, improvements = suitability_rating(rows, budget_met)
+    budget_action = ""
+    if req.budget is not None and budget_met is not True:
+        risks.append(
+            {
+                "title": "Месячный бюджет",
+                "label": costs["budget_label"],
+                "reason": ", ".join(costs["missing"]),
+            }
+        )
+        if costs["complete"]:
+            budget_action = f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
+        else:
+            budget_action = "Уточните полную месячную нагрузку."
+            if budget_met is False:
+                budget_action += " Известные расходы уже превышают лимит."
+            else:
+                improvements.append({"budget": True, "gain": None})
+        budget_action += f" Цель — до {money_text(req.budget)} в месяц."
+    return {
+        "p": p,
+        "status": status,
+        "score": score,
+        "improvements": improvements,
+        "budget_action": budget_action,
+        "economics": costs,
+        "risks": risks,
+        "rows": rows,
+        "evidence": evidence_summary(rows),
+    }
+
+
+def score_order(card):
+    return -(card["score"] if card["score"] is not None else -1)
+
+
+def rank_premises(req, *, requirements=None):
+    if requirements is None:
+        requirements = active_requirements(req)
+    ready = any(r.priority == "required" for r in requirements)
     links = (
         req.premises_links.filter(premises__agency_id=req.agency_id)
         .select_related("premises")
         .prefetch_related(
             Prefetch(
                 "premises__observations",
-                queryset=observations,
+                queryset=ranking_observations(requirements),
                 to_attr="ranking_observations",
             )
         )
     )
-    cards = []
-    for link in links:
-        p = link.premises
-        status, rows = assess_requirements(p, requirements, p.ranking_observations)
-        costs = economics(p, req, context=link)
-        risks = [
-            {
-                "title": row["requirement"],
-                "label": row["label"],
-                "reason": row["reason"] if row["status"] == "clarify" else row["value"],
-            }
-            for row in rows
-            if row["status"] != "pass"
-        ]
-        budget_met = budget_action = None
-        if req.budget is not None:
-            over_budget = Decimal(costs["gap"]) > 0 and not costs["rent_conflict"]
-            budget_met = costs["complete"] and not over_budget
-            if not budget_met:
-                risks.append(
-                    {
-                        "title": "Месячный бюджет",
-                        "label": (
-                            costs["budget_label"]
-                            if over_budget
-                            else "Требует уточнения"
-                        ),
-                        "reason": ", ".join(costs["missing"]),
-                    }
-                )
-                if costs["complete"]:
-                    budget_action = (
-                        f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
-                    )
-                else:
-                    budget_action = "Уточните полную месячную нагрузку."
-                    if over_budget:
-                        budget_action += " Известные расходы уже превышают лимит."
-                budget_action += f" Цель — до {money_text(req.budget)} в месяц."
-        score, improvements = suitability_rating(rows, budget_met)
-        cards.append(
-            {
-                "p": p,
-                "status": status,
-                "score": score,
-                "improvements": improvements,
-                "budget_action": budget_action,
-                "economics": costs,
-                "risks": risks,
-            }
+    cards = [
+        assess_premises(
+            req,
+            link.premises,
+            requirements,
+            link.premises.ranking_observations,
+            context=link,
         )
-    status_order = {"pass": 0, "clarify": 1, "blocker": 2}
+        for link in links
+    ]
     cards.sort(
-        key=lambda card: (
-            status_order[card["status"]],
-            -(card["score"] if card["score"] is not None else -1),
-            card["p"].pk,
-        )
+        key=lambda card: (STATUS_ORDER[card["status"]], score_order(card), card["p"].pk)
     )
     return cards, ready
 
@@ -620,16 +659,13 @@ def evaluate(p, user, request_obj):
     ).order_by("id")
     status, rows = assess_requirements(p, requirements, observations)
     costs = economics(p, req, context=context)
-    budget_met = (
-        None if req.budget is None else costs["complete"] and Decimal(costs["gap"]) <= 0
-    )
     result = {
         "status": status,
         "label": LABELS[status],
         "rows": rows,
         "economics": costs,
         "financial": serial(financial_metrics(req, p, context, costs)),
-        "fit_score": suitability_rating(rows, budget_met)[0],
+        "fit_score": suitability_rating(rows, budget_result(p, costs))[0],
         "evidence_summary": evidence_summary(rows),
         "regulatory": regulatory_checklist(req, context),
     }

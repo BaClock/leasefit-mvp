@@ -162,7 +162,8 @@ class AcceptanceTests(TestCase):
         self.assertContains(response, "12.00 кВт")
         self.assertContains(response, "Выбрать из каталога")
         self.assertContains(response, "Создать новое помещение")
-        self.assertNotContains(response, catalog_only.label)
+        self.assertContains(response, catalog_only.label)
+        self.assertNotIn(catalog_only.pk, [card["p"].pk for card in response.context["cards"]])
         self.assertTrue(
             response.context["compare_url"].split("?")[1].startswith(
                 f"objects={confirmed.pk}&objects={self.p.pk}"

@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.core.exceptions import PermissionDenied
 from django.core import signing
+from django.core.paginator import Paginator
 from .business import FORMATS, TEMPLATE_VERSION, recommendations
 from .business_forms import BusinessSetupForm
 from .metric_forms import FinancialPlanForm
@@ -27,6 +28,11 @@ from .regulations import (
     regulatory_checklist,
 )
 from .operations import STRUCTURED, value_label
+from .recommendations import (
+    for_request_city,
+    recommend_catalog_premises,
+    technical_filters,
+)
 from .models import *
 from .forms import *
 from .services import *
@@ -308,7 +314,33 @@ def delete_request(request, pk):
 @require_GET
 def objects(request, pk):
     obj = load_request(request, pk)
-    cards, ranking_ready = rank_premises(obj)
+    requirements = active_requirements(obj)
+    cards, ranking_ready = rank_premises(obj, requirements=requirements)
+    catalog = catalog_scope(request)
+    selected_ids = {card["p"].pk for card in cards}
+    catalog_count = catalog.count()
+    city_catalog = for_request_city(catalog, obj)
+    districts = (
+        city_catalog.exclude(district="")
+        .order_by("district")
+        .values_list("district", flat=True)
+        .distinct()
+    )
+    form = RecommendationFilterForm(request.GET, districts=list(districts))
+    recommendations, counts = [], {}
+    if catalog_count and ranking_ready and form.is_valid():
+        recommendations, counts = recommend_catalog_premises(
+            obj, catalog, requirements, form.cleaned_data, selected_ids
+        )
+    page = Paginator(recommendations, 20).get_page(request.GET.get("page"))
+    groups = {
+        status: [card for card in page if card["status"] == status]
+        for status in STATUS_ORDER
+    }
+    filter_params = request.GET.copy()
+    filter_params.pop("page", None)
+    for card in cards:
+        card["compare_url"] = comparison_url(obj, [card["p"]])
     return render(
         request,
         "objects.html",
@@ -317,6 +349,21 @@ def objects(request, pk):
             "cards": cards,
             "ranking_ready": ranking_ready,
             "compare_url": comparison_url(obj, [card["p"] for card in cards[:4]]),
+            "recommendation_groups": groups,
+            "recommendation_counts": counts,
+            "recommendation_page": page,
+            "recommendation_filters": form,
+            "catalog_count": catalog_count,
+            "city_excluded": (
+                catalog_count - city_catalog.count()
+                if obj.city and catalog_count
+                else 0
+            ),
+            "filter_query": filter_params.urlencode(),
+            "action_query": request.GET.urlencode(),
+            "normative_questions": [
+                row for row in regulatory_checklist(obj) if row["status"] == "pending"
+            ],
         },
     )
 
@@ -1302,25 +1349,7 @@ def filtered_catalog(request):
                 ),
             )
         ).filter(base_rent__lte=d["rent_max"])
-    criteria = []
-    for field, code in [
-        ("power_min", "power_kw"),
-        ("water", "water_supply"),
-        ("ventilation", "ventilation"),
-    ]:
-        if d.get(field) is not None and d.get(field) != "":
-            char = Characteristic.objects.get(code=code)
-            criteria.append(
-                Requirement(
-                    characteristic=char,
-                    name=char.label,
-                    unit=char.unit,
-                    operator="gte" if field == "power_min" else "eq",
-                    minimum=d[field] if field == "power_min" else None,
-                    expected=d[field] == "yes",
-                    priority="required",
-                )
-            )
+    criteria = technical_filters(d)
     if criteria:
         ids = [
             p.pk
@@ -1376,14 +1405,7 @@ def select_premises(request, pk):
 
     form = AttachForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        changed = False
-        for p in form.cleaned_data["objects"]:
-            _, created = RequestPremises.objects.get_or_create(request=req, premises=p)
-            changed = changed or created
-        if changed:
-            req.selection_version += 1
-            req.save(update_fields=["selection_version"])
-            audit(request.user, "request.premises.attached", req.pk)
+        attach_selected(req, form.cleaned_data["objects"], request.user)
         messages.success(request, "Помещения добавлены без создания копий.")
         return redirect("objects", pk=pk)
     return render(
@@ -1397,6 +1419,40 @@ def select_premises(request, pk):
             "attached_ids": list(req.premises.values_list("id", flat=True)),
         },
     )
+
+
+def attach_selected(req, premises, actor):
+    added = False
+    for obj in premises:
+        _, created = RequestPremises.objects.get_or_create(request=req, premises=obj)
+        added = added or created
+    if added:
+        req.selection_version += 1
+        req.save(update_fields=["selection_version"])
+        audit(actor, "request.premises.attached", req.pk)
+    return added
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def attach_recommendation(request, pk, object_id):
+    req = load_request(request, pk, write=True, lock=True)
+    obj = get_object_or_404(catalog_scope(request).select_for_update(), pk=object_id)
+    if not check_version(request, req) or request.POST.get("premises_version") != str(
+        obj.version
+    ):
+        messages.warning(
+            request,
+            "Профиль или помещение изменились. Проверьте обновлённую рекомендацию.",
+        )
+    elif attach_selected(req, [obj], request.user):
+        messages.success(request, "Помещение добавлено к сравнению.")
+    else:
+        messages.info(request, "Помещение уже в сравнении.")
+    url = reverse("objects", args=[pk])
+    query = request.GET.urlencode()
+    return redirect(f"{url}?{query}" if query else url)
 
 
 @workspace

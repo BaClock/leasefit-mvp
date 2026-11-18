@@ -1,0 +1,119 @@
+{% load leasefit_tags l10n %}
+  <section class="ranking panel" id="selected" aria-labelledby="ranking-title">
+    <header class="ranking-header">
+      <div>
+        <h2 id="ranking-title">Выбранные для сравнения</h2>
+        <p>Здесь находятся помещения, которые вы выбрали для детальной оценки и подготовки отчёта клиенту.</p>
+      </div>
+      {% if cards %}<span class="count">{{ cards|length }}</span>{% endif %}
+    </header>
+    {% if cards %}
+      {% if not ranking_ready %}
+        <p class="ranking-note">Добавьте обязательное требование в профиле, чтобы рассчитать балл.</p>
+      {% endif %}
+      <table class="ranking-table" role="table" aria-labelledby="ranking-title">
+        <thead>
+          <tr role="row">
+            <th scope="col">Помещение</th>
+            <th scope="col">Общий балл</th>
+            <th scope="col">Статус и риски</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for card in cards %}
+            <tr role="row" id="selected-{{ card.p.pk }}">
+              <th scope="row" role="rowheader">
+                <a class="ranking-name" href="{% url 'premises' req.pk card.p.pk %}">{{ card.p.label }}</a>
+                <span class="ranking-meta">
+                  {{ card.p.get_premises_type_display }}
+                  {% if card.p.area is not None %} · {{ card.p.area }} м²{% endif %}
+                  {% if card.p.floor %} · Этаж {{ card.p.floor }}{% endif %}
+                </span>
+                {% if card.economics.complete %}
+                  <span class="ranking-meta">{{ card.economics.monthly_total|rub }} в месяц</span>
+                {% elif card.economics.monthly_total|positive %}
+                  <span class="ranking-meta">Известные расходы в месяц · {{ card.economics.monthly_total|rub }}</span>
+                {% endif %}
+                {% if can_edit %}
+                  <form method="post" action="{% url 'detach_premises' req.pk card.p.pk %}">
+                    {% csrf_token %}
+                    <button class="link-button" data-confirm="Убрать помещение из сравнения? Карточка останется в каталоге.">Убрать из сравнения</button>
+                  </form>
+                {% endif %}
+              </th>
+              <td class="ranking-score" role="cell">
+                <span class="ranking-mobile-label" aria-hidden="true">Общий балл</span>
+                {% if card.score is not None %}
+                  <strong>{{ card.score }}</strong><span class="ranking-scale"> / 100</span>
+                  <progress max="100" value="{{ card.score|unlocalize }}" aria-hidden="true"></progress>
+                {% else %}
+                  <span class="ranking-meta">Недостаточно данных</span>
+                {% endif %}
+                {% if card.improvements %}
+                  <details class="ranking-improvements">
+                    <summary>Что повысит балл</summary>
+                    <ul>
+                      {% for item in card.improvements %}
+                        <li>
+                          {% if item.gain %}<span class="ranking-gain">+{{ item.gain }}</span>{% endif %}
+                          {% if item.budget %}
+                            {% if can_edit %}
+                              <a href="{% url 'premises' req.pk card.p.pk %}?edit=commercial#commercial-terms">Месячный бюджет</a>
+                            {% else %}
+                              Месячный бюджет
+                            {% endif %}
+                            <span class="ranking-meta">{{ card.budget_action }}</span>
+                          {% else %}
+                            {% if can_edit %}
+                              <a href="{% url 'premises' req.pk card.p.pk %}?characteristic={{ item.code|urlencode }}#evidence-form">{{ item.requirements|join:" · " }}</a>
+                            {% else %}
+                              {{ item.requirements|join:" · " }}
+                            {% endif %}
+                            <span class="ranking-meta">{% if item.needs_changes %}Устраните несоответствие и подтвердите новое значение.{% else %}Уточните фактические данные и подтвердите соответствие.{% endif %}</span>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                    {% if card.score is not None %}<p class="ranking-meta">Прирост по каждому пункту рассчитан от текущего балла.</p>{% endif %}
+                  </details>
+                {% endif %}
+              </td>
+              <td role="cell">
+                <span class="ranking-mobile-label" aria-hidden="true">Статус и риски</span>
+                <span class="pill {{ card.status }}">
+                  {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
+                </span>
+                {% if card.risks %}
+                  <details class="ranking-risks">
+                    <summary>Причины и риски ({{ card.risks|length }})</summary>
+                    <ul>
+                      {% for risk in card.risks %}
+                        <li>
+                          <strong>{{ risk.title }}</strong>
+                          <span>{{ risk.label }}{% if risk.reason %} · {{ risk.reason }}{% endif %}</span>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </details>
+                {% elif ranking_ready %}
+                  <span class="ranking-meta">Причин и рисков: 0</span>
+                {% endif %}
+                <div class="ranking-links">
+                  <a href="{{ card.compare_url }}">Открыть проверку</a>
+                  <a href="{{ card.compare_url }}#analytics">Финансовый анализ</a>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <details class="ranking-method">
+        <summary>Как считается балл</summary>
+        <p>За подтверждённое выполнение обязательного параметра начисляются 3 балла, желательного — 1 балл. Полные месячные расходы в пределах заданного бюджета дают ещё 2 балла. Сумма делится на максимум и переводится в шкалу от 0 до 100.</p>
+        <p>Невыполненные и неподтверждённые технические условия дают 0 баллов. Каждый параметр учитывается один раз. При нескольких условиях по параметру приоритет у обязательных. Бюджет учитывается при известной полной сумме либо если подтверждённый подытог уже выше лимита.</p>
+        <p>Статус определяют обязательные требования. Рейтинг сортируется сначала по статусу, затем по баллу. Когда нет ни одной подтверждённой технической проверки, балл не рассчитывается.</p>
+      </details>
+    {% else %}
+      <p class="ranking-note">{% if can_edit %}Выберите интересующие помещения из рекомендаций.{% else %}Помещения для сравнения пока не выбраны.{% endif %}</p>
+    {% endif %}
+  </section>

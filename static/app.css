@@ -1572,3 +1572,76 @@ button.secondary {
     grid-template-columns: 1fr;
   }
 }
+.recommendation-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.recommendation-summary div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.recommendation-summary dt {
+  color: var(--muted);
+  font-size: .8rem;
+}
+.recommendation-summary dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 10px 0 18px;
+}
+.recommendation-card {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.recommendation-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.recommendation-card-head h4,
+.recommendation-card h5 {
+  margin: 0;
+}
+.recommendation-card p,
+.recommendation-card ul {
+  margin: 8px 0;
+}
+.recommendation-controls,
+.recommendation-blockers,
+.recommendation-group-title {
+  margin-top: 18px;
+}
+.ranking-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.recommendation-card-actions {
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .recommendation-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 480px) {
+  .recommendations-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

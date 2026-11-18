@@ -1,5 +1,5 @@
 {% load leasefit_tags %}
-<section class="panel">
+<section class="panel" id="analytics">
   <h2>Аналитика и следующие действия</h2>
   {% if can_edit %}<p><a href="{% url 'financial_plan' req.pk %}">Настроить финансовый сценарий</a></p>{% endif %}
   {% for c in columns %}

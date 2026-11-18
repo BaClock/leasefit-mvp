@@ -87,6 +87,17 @@ RequirementsFormSet = inlineformset_factory(
 
 
 class PremisesForm(VersionForm):
+    location_fields = {"city", "district", "location_confirmed"}
+    essential_fields = {
+        "label",
+        "premises_type",
+        "floor",
+        "number",
+        "listing_url",
+        "area",
+        *location_fields,
+    }
+
     class Meta:
         model = Premises
         exclude = ["agency", "updated_at", "version", "creation_key"]
@@ -98,8 +109,17 @@ class PremisesForm(VersionForm):
             ),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.is_bound and not self.location_fields.intersection(self.data):
+            # Older clients can edit the other fields without clearing geography.
+            for field in self.location_fields:
+                self.fields[field].disabled = True
+
     def clean(self):
         d = super().clean()
+        if d.get("location_confirmed") and not d.get("city"):
+            self.add_error("city", "Укажите город перед подтверждением местоположения.")
         if d.get("commercial_date") and d["commercial_date"] > timezone.localdate():
             self.add_error("commercial_date", "Дата не может быть в будущем.")
         if d.get("commercial_status") == "confirmed" and (
@@ -904,7 +924,7 @@ class CharacteristicForm(forms.Form):
 
 
 class CatalogFilterForm(forms.Form):
-    q = forms.CharField(label="Адрес или рабочая метка", required=False)
+    q = forms.CharField(label="Адрес или рабочая метка", required=False, max_length=250)
     premises_type = forms.ChoiceField(
         label="Тип помещения",
         required=False,
@@ -938,3 +958,43 @@ class CatalogFilterForm(forms.Form):
         ):
             self.add_error("area_max", "Верхняя граница меньше нижней.")
         return d
+
+
+class RecommendationFilterForm(CatalogFilterForm):
+    rent_max = None
+    monthly_max = forms.DecimalField(
+        label="Полная стоимость до, ₽/мес.", required=False, min_value=0
+    )
+    status = forms.ChoiceField(
+        label="Технический статус",
+        required=False,
+        choices=[
+            ("", "Все статусы"),
+            ("pass", "Соответствует"),
+            ("clarify", "Требует уточнения"),
+            ("blocker", "Не соответствует"),
+        ],
+    )
+    only_confirmed = forms.BooleanField(
+        label="Есть подтверждённые обязательные параметры", required=False
+    )
+    only_new = forms.BooleanField(label="Ещё не добавлены в сравнение", required=False)
+    sort = forms.ChoiceField(
+        label="Сортировка внутри группы",
+        required=False,
+        choices=[
+            ("", "По соответствию"),
+            ("score", "По рейтингу"),
+            ("monthly", "Сначала ниже стоимость"),
+            ("area", "Сначала больше площадь"),
+        ],
+    )
+
+    def __init__(self, *args, districts=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        if districts:
+            self.fields["district"] = forms.ChoiceField(
+                label="Район",
+                required=False,
+                choices=[("", "Все районы"), *((name, name) for name in districts)],
+            )

@@ -25,7 +25,7 @@ FIXTURE_USER = "novosibirsk-fixture@example.invalid"
 
 
 @transaction.atomic
-def seed():
+def seed(*, include_links=True):
     user = User.objects.filter(username=FIXTURE_USER).first()
     if user:
         membership = Membership.objects.filter(
@@ -45,14 +45,17 @@ def seed():
         char.code: char for char in Characteristic.objects.filter(agency__isnull=True)
     }
     premises = []
-    for label, power, rent in [
-        ("Помещение A · Ленинский район", 15, 60000),
-        ("Помещение B · Центральный район", 30, 73000),
-        ("Помещение C · Октябрьский район", 25, 65000),
+    for label, district, power, rent in [
+        ("Помещение A · Ленинский район", "Ленинский", 15, 60000),
+        ("Помещение B · Центральный район", "Центральный", 30, 73000),
+        ("Помещение C · Октябрьский район", "Октябрьский", 25, 65000),
     ]:
         obj = Premises.objects.create(
             agency=agency,
             label=label,
+            city="Новосибирск",
+            district=district,
+            location_confirmed=True,
             area=60,
             rent=rent,
             operating=8000,
@@ -156,7 +159,7 @@ def seed():
                 operator="eq",
                 structured_value=["service"],
             )
-        for obj in premises:
+        for obj in premises if include_links else ():
             RequestPremises.objects.create(
                 request=request,
                 premises=obj,
@@ -178,13 +181,18 @@ class Command(BaseCommand):
             action="store_true",
             help="Подтверждение использования отдельной учебной базы.",
         )
+        parser.add_argument(
+            "--unlinked",
+            action="store_true",
+            help="В новой учебной базе оставить запросы без выбранных помещений.",
+        )
 
     def handle(self, *args, **options):
         if not settings.DEBUG or not options["disposable_db"]:
             raise CommandError(
                 "Требуется отдельная учебная база, DEBUG=1 и --disposable-db."
             )
-        _, requests = seed()
+        _, requests = seed(include_links=not options["unlinked"])
         self.stdout.write(
             self.style.SUCCESS(
                 f"Учебный набор готов. Запросы: {', '.join(str(req.pk) for req in requests)}."

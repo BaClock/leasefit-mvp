@@ -1,0 +1,6 @@
+{% if title %}<h3 class="recommendation-group-title">{{ title }}</h3>{% endif %}
+<div class="recommendation-grid">
+  {% for card in items %}
+    {% include "recommendation_card.html" %}
+  {% endfor %}
+</div>

@@ -77,6 +77,11 @@ urlpatterns = [
         name="detach_premises",
     ),
     path(
+        "app/requests/<int:pk>/objects/<int:object_id>/attach",
+        v.attach_recommendation,
+        name="attach_recommendation",
+    ),
+    path(
         "app/requests/<int:pk>/objects/<int:object_id>/context",
         v.request_context,
         name="request_context",

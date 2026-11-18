@@ -1,137 +1,91 @@
 {% extends "base.html" %}
-{% load leasefit_tags l10n %}
 {% block content %}
   {% include "request_header.html" %}
-  <section class="ranking panel" aria-labelledby="ranking-title">
-    <header class="ranking-header">
+  <section class="panel" id="recommendations" aria-labelledby="recommendations-title">
+    <div class="section-heading recommendations-heading">
       <div>
-        <h2 id="ranking-title">Топ помещений</h2>
-        <p>В рейтинге только помещения, добавленные в этот запрос.</p>
+        <h2 id="recommendations-title">Подходящие помещения из каталога</h2>
+        {% if catalog_count and ranking_ready %}
+          <p>LeaseFIT проанализировал помещения вашего агентства по требованиям выбранного бизнеса.</p>
+        {% endif %}
       </div>
-      {% if cards %}<span class="count">{{ cards|length }}</span>{% endif %}
-    </header>
-    {% if cards %}
-      {% if not ranking_ready %}
-        <p class="ranking-note">Добавьте обязательное требование в профиле, чтобы рассчитать балл.</p>
-      {% endif %}
-      <table class="ranking-table" role="table" aria-labelledby="ranking-title">
-        <thead>
-          <tr role="row">
-            <th scope="col">Помещение</th>
-            <th scope="col">Общий балл</th>
-            <th scope="col">Статус и риски</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for card in cards %}
-            <tr role="row">
-              <th scope="row" role="rowheader">
-                <a class="ranking-name" href="{% url 'premises' req.pk card.p.pk %}">{{ card.p.label }}</a>
-                <span class="ranking-meta">
-                  {{ card.p.get_premises_type_display }}
-                  {% if card.p.area is not None %} · {{ card.p.area }} м²{% endif %}
-                  {% if card.p.floor %} · Этаж {{ card.p.floor }}{% endif %}
-                </span>
-                {% if card.economics.complete %}
-                  <span class="ranking-meta">{{ card.economics.monthly_total|rub }} в месяц</span>
-                {% elif card.economics.monthly_total|positive %}
-                  <span class="ranking-meta">Известные расходы в месяц · {{ card.economics.monthly_total|rub }}</span>
-                {% endif %}
-                {% if can_edit %}
-                  <form method="post" action="{% url 'detach_premises' req.pk card.p.pk %}">
-                    {% csrf_token %}
-                    <button class="link-button" data-confirm="Убрать помещение из этого запроса? Карточка останется в каталоге.">Убрать из запроса</button>
-                  </form>
-                {% endif %}
-              </th>
-              <td class="ranking-score" role="cell">
-                <span class="ranking-mobile-label" aria-hidden="true">Общий балл</span>
-                {% if card.score is not None %}
-                  <strong>{{ card.score }}</strong><span class="ranking-scale"> / 100</span>
-                  <progress max="100" value="{{ card.score|unlocalize }}" aria-hidden="true"></progress>
-                {% else %}
-                  <span class="ranking-meta">Недостаточно данных</span>
-                {% endif %}
-                {% if card.improvements %}
-                  <details class="ranking-improvements">
-                    <summary>Что повысит балл</summary>
-                    <ul>
-                      {% for item in card.improvements %}
-                        <li>
-                          {% if item.gain %}<span class="ranking-gain">+{{ item.gain }}</span>{% endif %}
-                          {% if item.budget %}
-                            {% if can_edit %}
-                              <a href="{% url 'premises' req.pk card.p.pk %}?edit=commercial#commercial-terms">Месячный бюджет</a>
-                            {% else %}
-                              Месячный бюджет
-                            {% endif %}
-                            <span class="ranking-meta">{{ card.budget_action }}</span>
-                          {% else %}
-                            {% if can_edit %}
-                              <a href="{% url 'premises' req.pk card.p.pk %}?characteristic={{ item.code|urlencode }}#evidence-form">{{ item.requirements|join:" · " }}</a>
-                            {% else %}
-                              {{ item.requirements|join:" · " }}
-                            {% endif %}
-                            <span class="ranking-meta">{% if item.needs_changes %}Устраните несоответствие и подтвердите новое значение.{% else %}Уточните фактические данные и подтвердите соответствие.{% endif %}</span>
-                          {% endif %}
-                        </li>
-                      {% endfor %}
-                    </ul>
-                    {% if card.score is not None %}<p class="ranking-meta">Прирост по каждому пункту рассчитан от текущего балла.</p>{% endif %}
-                  </details>
-                {% endif %}
-              </td>
-              <td role="cell">
-                <span class="ranking-mobile-label" aria-hidden="true">Статус и риски</span>
-                <span class="pill {{ card.status }}">
-                  {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
-                </span>
-                {% if card.risks %}
-                  <details class="ranking-risks">
-                    <summary>Причины и риски ({{ card.risks|length }})</summary>
-                    <ul>
-                      {% for risk in card.risks %}
-                        <li>
-                          <strong>{{ risk.title }}</strong>
-                          <span>{{ risk.label }}{% if risk.reason %} · {{ risk.reason }}{% endif %}</span>
-                        </li>
-                      {% endfor %}
-                    </ul>
-                  </details>
-                {% elif ranking_ready %}
-                  <span class="ranking-meta">Причин и рисков: 0</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <details class="ranking-method">
-        <summary>Как считается балл</summary>
-        <p>За подтверждённое выполнение обязательного параметра начисляются 3 балла, желательного — 1 балл. Полные месячные расходы в пределах заданного бюджета дают ещё 2 балла. Сумма делится на максимум и переводится в шкалу от 0 до 100.</p>
-        <p>Невыполненные и неподтверждённые условия дают 0 баллов. Каждый параметр учитывается один раз. Если по нему есть несколько условий, приоритет у обязательных, и должны выполняться все условия учитываемой важности. Без месячного лимита бюджет исключается из расчёта.</p>
-        <p>Статус определяют обязательные требования. Рейтинг сортируется сначала по статусу, затем по баллу. Когда нет ни одной подтверждённой технической проверки, балл не рассчитывается.</p>
-      </details>
+      <a class="button secondary" href="#selected">К выбранным{% if cards %} · {{ cards|length }}{% endif %}</a>
+    </div>
+    <dl class="recommendation-summary">
+      <div><dt>В каталоге</dt><dd>{{ catalog_count }}</dd></div>
+      <div><dt>Соответствуют</dt><dd>{{ recommendation_counts.pass|default:"0" }}</dd></div>
+      <div><dt>Требуют уточнения</dt><dd>{{ recommendation_counts.clarify|default:"0" }}</dd></div>
+      <div><dt>Есть блокеры</dt><dd>{{ recommendation_counts.blocker|default:"0" }}</dd></div>
+      <div><dt>Уже выбрано</dt><dd>{{ cards|length }}</dd></div>
+    </dl>
+    {% if not catalog_count %}
+      <p>В каталоге пока нет помещений. Добавьте первое помещение, чтобы LeaseFIT мог выполнять автоматический подбор.</p>
+      <a class="button" href="{% url 'start_premises' %}">Создать помещение</a>
+    {% elif not ranking_ready %}
+      <p>Укажите хотя бы одно обязательное требование бизнеса, чтобы начать подбор.</p>
+      <a class="button" href="{% url 'profile' req.pk %}">Перейти к требованиям</a>
     {% else %}
-      <p class="ranking-note">В запросе пока нет помещений.{% if can_edit %} Добавьте их из каталога или создайте карточку вручную.{% endif %}</p>
+      {% if city_excluded %}
+        <p class="hint">За пределами города «{{ req.city }}» по подтверждённым данным · {{ city_excluded }}. Объекты с неизвестным городом остаются в подборе.</p>
+      {% endif %}
+      <details class="recommendation-controls" {% if filter_query or recommendation_filters.errors %}open{% endif %}>
+        <summary>Фильтры и сортировка</summary>
+        <form method="get" action="{% url 'objects' req.pk %}#recommendations">
+          <div class="form-grid">{% include "fields.html" with form=recommendation_filters %}</div>
+          <div class="actions">
+            <button class="secondary">Применить фильтры</button>
+            {% if filter_query %}<a href="{% url 'objects' req.pk %}#recommendations">Сбросить</a>{% endif %}
+          </div>
+        </form>
+      </details>
+      {% if not recommendation_filters.errors and not recommendation_counts.pass %}
+        <p>Подтверждённых подходящих помещений пока не найдено.</p>
+      {% endif %}
+      {% if recommendation_groups.pass %}
+        {% include "recommendation_group.html" with title="Соответствуют требованиям" items=recommendation_groups.pass %}
+      {% endif %}
+      {% if recommendation_groups.clarify %}
+        {% include "recommendation_group.html" with title="Требуют уточнения" items=recommendation_groups.clarify %}
+      {% endif %}
+      {% if recommendation_groups.blocker %}
+        <details class="recommendation-blockers">
+          <summary>Не соответствуют требованиям ({{ recommendation_counts.blocker }})</summary>
+          {% include "recommendation_group.html" with title="" items=recommendation_groups.blocker %}
+        </details>
+      {% endif %}
+      {% if not recommendation_page.paginator.count and not recommendation_filters.errors %}
+        <p>По текущим фильтрам вариантов нет.</p>
+      {% endif %}
+      {% if recommendation_page.has_other_pages %}
+        <nav class="actions" aria-label="Страницы рекомендаций">
+          {% if recommendation_page.has_previous %}
+            <a class="button secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ recommendation_page.previous_page_number }}#recommendations">← Предыдущая</a>
+          {% endif %}
+          <span>Страница {{ recommendation_page.number }} из {{ recommendation_page.paginator.num_pages }} · {{ recommendation_page.paginator.count }} вариантов</span>
+          {% if recommendation_page.has_next %}
+            <a class="button secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ recommendation_page.next_page_number }}#recommendations">Следующая →</a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    {% endif %}
+    {% if normative_questions %}
+      <details class="recommendation-controls">
+        <summary>Нормативные вопросы к проверке</summary>
+        <p>Проверяются отдельно по документам и конкретному помещению.</p>
+        <ul>{% for rule in normative_questions %}<li>{{ rule.title }} · {{ rule.evidence }}</li>{% endfor %}</ul>
+        <a href="{% url 'profile' req.pk %}#normative-checklist">Открыть нормативный чек-лист профиля</a>
+      </details>
     {% endif %}
   </section>
-  {% if can_edit %}
-    <div class="ranking-actions">
-      <section class="panel">
-        <h3>Добавить из каталога</h3>
-        <p>Выберите существующие помещения агентства для рейтинга и сравнения.</p>
-        <a class="button" href="{% url 'select_premises' req.pk %}">Выбрать из каталога</a>
-      </section>
-      <section class="panel">
-        <h3>Создать помещение вручную</h3>
-        <p>Заполните новую карточку. Помещение появится в каталоге и в этом запросе.</p>
-        <a class="button secondary" href="{% url 'premises_new' req.pk %}">Создать новое помещение</a>
-      </section>
+  {% include "selected_premises.html" %}
+  {% if can_edit and catalog_count %}
+    <div class="actions">
+      <a class="button secondary" href="{% url 'select_premises' req.pk %}">Выбрать из каталога вручную</a>
+      <a class="button secondary" href="{% url 'premises_new' req.pk %}">Создать новое помещение</a>
     </div>
   {% endif %}
   <div class="actions">
     <a class="button secondary" href="{% url 'refine' req.pk %}">← Назад к уточнениям</a>
-    <a class="button" href="{{ compare_url }}">Далее: проверка и сравнение →</a>
+    {% if cards %}<a class="button" href="{{ compare_url }}">Далее: проверка и сравнение →</a>{% endif %}
   </div>
 {% endblock %}

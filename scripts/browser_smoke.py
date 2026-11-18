@@ -152,13 +152,9 @@ with sync_playwright() as pw:
         req_id = page.url.split("/")[-2]
         page.get_by_role("button", name="Далее: помещения").click()
         page.wait_for_url(re.compile(r"/requests/\d+/objects$"))
-        page.get_by_role("link", name="Выбрать из каталога").click()
         return req_id
 
     coffee = create_request("Кофейня", 25, add_area=True)
-    for p_id in ids:
-        page.locator(f'input[name=objects][value="{p_id}"]').check()
-    page.get_by_role("button", name="Добавить выбранные без копирования").click()
     page.goto(base + f"/app/requests/{coffee}/business")
     page.locator("#id_business_format").select_option("food.cafe_kitchen")
     page.locator("#id_preparation").select_option("yes")
@@ -177,7 +173,22 @@ with sync_playwright() as pw:
         page.get_by_role("heading", name="Нормативные и санитарные требования")
     ).to_be_visible()
     page.goto(base + f"/app/requests/{coffee}/objects")
-    ranking = page.get_by_role("table", name="Топ помещений")
+    expect(page.locator("#selected")).to_contain_text(
+        "Выберите интересующие помещения из рекомендаций"
+    )
+    expect(page.locator("#recommendations")).to_contain_text(
+        "Подходящие помещения из каталога"
+    )
+    for label in ("Общий вариант А", "Общий вариант Б"):
+        page.locator(".recommendation-blockers > summary").click()
+        card = page.locator(".recommendation-card").filter(has_text=f"{label} {tag}")
+        expect(card).to_be_visible()
+        card.get_by_text("Посмотреть причины оценки").click()
+        expect(card).to_contain_text("Критические несоответствия")
+        card.get_by_role("button", name="Добавить к сравнению").click()
+        expect(card.get_by_text("Уже в сравнении", exact=True)).to_have_count(1)
+    capture("recommendations")
+    ranking = page.get_by_role("table", name="Выбранные для сравнения")
     ranked_rows = ranking.locator("tbody tr")
     expect(ranked_rows).to_have_count(2)
     expect(ranked_rows.first).to_contain_text("Не соответствует")
@@ -201,7 +212,7 @@ with sync_playwright() as pw:
     page.goto(base + f"/app/requests/{coffee}/objects")
     manual_row = ranked_rows.filter(has_text=f"Ручной вариант {tag}")
     expect(manual_row).to_contain_text("Недостаточно данных")
-    manual_row.get_by_role("button", name="Убрать из запроса").click()
+    manual_row.get_by_role("button", name="Убрать из сравнения").click()
     expect(ranked_rows).to_have_count(2)
     page.goto(base + f"/app/requests/{coffee}/objects/{ids[0]}")
     form = page.locator(f'form[action$="/{ids[0]}/context"]')
@@ -240,6 +251,7 @@ with sync_playwright() as pw:
     event.value.save_as(str(original))
     original_hash = hashlib.sha256(original.read_bytes()).hexdigest()
     pickup = create_request("ПВЗ", 15)
+    page.get_by_role("link", name="Выбрать из каталога вручную").click()
     page.locator(f'input[name=objects][value="{ids[0]}"]').check()
     page.get_by_role("button", name="Добавить выбранные без копирования").click()
     page.goto(base + f"/app/requests/{pickup}/compare")
@@ -263,7 +275,7 @@ with sync_playwright() as pw:
     page.get_by_role("button", name="↻ Проверить / пересчитать выбранные").click()
     expect(page.locator("main")).to_contain_text("Соответствует")
     page.goto(base + f"/app/requests/{pickup}/objects")
-    page.get_by_role("button", name="Убрать из запроса").click()
+    page.get_by_role("button", name="Убрать из сравнения").click()
     page.goto(base + f"/app/premises/{ids[0]}")
     expect(page.get_by_role("heading", name=f"Общий вариант А {tag}")).to_be_visible()
     page.goto(base + f"/app/requests/{coffee}/compare")

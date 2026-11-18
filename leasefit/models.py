@@ -210,6 +210,11 @@ class Premises(models.Model):
     )
     lease_terms = models.TextField("Подтверждённые общие условия договора", blank=True)
     label = models.CharField("Адрес или рабочая метка", max_length=250)
+    city = models.CharField("Город", max_length=120, blank=True)
+    district = models.CharField("Район", max_length=120, blank=True)
+    location_confirmed = models.BooleanField(
+        "Город подтверждён по адресу или документам", default=False
+    )
     floor = models.CharField("Этаж", max_length=40, blank=True)
     number = models.CharField("Номер помещения", max_length=60, blank=True)
     listing_url = models.URLField(
