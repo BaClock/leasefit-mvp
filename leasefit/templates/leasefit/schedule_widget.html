@@ -1,0 +1,17 @@
+<div class="weekly-schedule" data-weekly-schedule>
+  {% include "django/forms/widgets/select.html" with widget=widget.subwidgets.0 %}
+  <div data-weekly-hours>
+    <p class="muted">Заполните нужные дни. Конец раньше начала означает работу через полночь. Для полного дня укажите 00:00–24:00.</p>
+    {% for day, start, end in schedule_days %}
+      <div class="weekly-day">
+        <span>{{ day }}</span>
+        <label for="{{ start.attrs.id }}">С
+          {% include "django/forms/widgets/text.html" with widget=start %}
+        </label>
+        <label for="{{ end.attrs.id }}">До
+          {% include "django/forms/widgets/text.html" with widget=end %}
+        </label>
+      </div>
+    {% endfor %}
+  </div>
+</div>

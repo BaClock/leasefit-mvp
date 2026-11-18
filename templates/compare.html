@@ -114,6 +114,7 @@
     <div class="actions">
       <a class="button secondary" href="{% url 'objects' req.pk %}">← Назад к помещениям</a>{% if can_edit %}<button name="action" value="issue" {% if not preview %}disabled{% endif %}>Сформировать отчёт ↓</button>{% endif %}</div>{% if selected and not preview %}<p class="warning-text">Перед формированием отчёта пересчитайте выбранные помещения. Оценки отсутствуют или устарели.</p>{% endif %}</section>
   </form>
+  {% include "analytics.html" %}
   {% if preview %}
     <section class="report-preview panel">
       <div class="eyebrow">ПРЕДПРОСМОТР КЛИЕНТСКОЙ ВЕРСИИ</div>

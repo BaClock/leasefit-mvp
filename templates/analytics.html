@@ -1,0 +1,104 @@
+{% load leasefit_tags %}
+<section class="panel">
+  <h2>Аналитика и следующие действия</h2>
+  {% if can_edit %}<p><a href="{% url 'financial_plan' req.pk %}">Настроить финансовый сценарий</a></p>{% endif %}
+  {% for c in columns %}
+    <details>
+      <summary>{{ c.p.label }} · результаты и допущения</summary>
+      {% if c.ev %}
+        {% with result=c.ev.result f=c.ev.result.financial evidence=c.ev.result.evidence_summary e=c.ev.result.economics %}
+          <div class="form-grid">
+            <article class="fact-card">
+              <h3>M01 · Критические ограничения</h3>
+              <p>{{ result.label }}.</p>
+              <ul>
+                {% for row in result.rows %}
+                  {% if row.priority == "required" and row.status != "pass" %}
+                    <li>{{ row.requirement }}. {{ row.adjustment }} {{ row.question }}</li>
+                  {% endif %}
+                {% endfor %}
+              </ul>
+              {% if result.regulatory %}<p>Проверьте применимые нормативные пункты. <a href="{% url 'premises' req.pk c.p.pk %}#normative-checklist">Открыть чек-лист помещения</a>.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M02 · Предельная базовая аренда</h3>
+              <p>По бюджету · {% if e.allowed_rent is not None %}{{ e.allowed_rent|rub }}/мес.{% else %}{{ insufficient }}{% endif %}</p>
+              <p>По экономической модели · {% if f.profit_rent is not None %}{{ f.profit_rent|rub }}/мес.{% else %}{{ insufficient }}{% endif %}</p>
+              {% if f.budget_rent_gap|positive %}<p>Ставка собственника выше бюджетного предела на {{ f.budget_rent_gap|rub }}/мес. Используйте разницу в переговорах.</p>{% endif %}
+              {% if f.profit_rent_gap|positive and not f.profit_rent|negative %}<p>Для сценарных затрат ставку нужно снизить на {{ f.profit_rent_gap|rub }}/мес.</p>{% endif %}
+              {% if f.profit_rent|negative %}<p>Сценарий даёт дефицит даже при нулевой базовой аренде. Проверьте затраты и выручку.</p>{% else %}<p>Сопоставьте ставку собственника {{ e.base|rub }} с применимыми пределами перед переговорами.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M03 · Расходы на помещение</h3>
+              <p>Базовая аренда {{ e.base|rub }}. {% if e.complete %}Полная нагрузка{% else %}Известный подытог{% endif %} {{ e.monthly_total|rub }}/мес.</p>
+              {% if e.missing %}<p>Уточните {{ e.missing|join:", " }}.</p>{% endif %}
+              {% if f.occupancy_share is not None %}<p>{{ f.occupancy_share }} % сценарной выручки уйдёт на регулярные расходы помещения.</p>{% else %}<p>Для доли расходов заполните полную нагрузку и сценарную выручку.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M04 · Точка безубыточности</h3>
+              {% if f.break_even is not None %}
+                <p>Нужно не менее {{ f.break_even }} операций в месяц{% if f.daily_break_even is not None %} или {{ f.daily_break_even }} в рабочий день{% endif %}. Сопоставьте порог с производительностью.</p>
+                {% if f.daily_break_even is None %}<p>Укажите рабочие дни для дневного порога.</p>{% endif %}
+              {% elif f.margin is not None and not f.margin|positive %}
+                <p>Маржа на операцию неположительная. Проверьте цену или переменные расходы.</p>
+              {% else %}<p>{{ insufficient }}. Укажите чек или вознаграждение, затраты и месячную нагрузку.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M05 · Деньги на открытие</h3>
+              <p>{% if f.opening_missing %}Известный подытог{% else %}Потребуется на открытие{% endif %} · {{ f.opening|rub }}.</p>
+              {% if f.opening_missing %}<p>Уточните {{ f.opening_missing|join:", " }}.</p>{% endif %}
+              {% if f.opening_gap|positive %}<p>Стартовый бюджет ниже {% if f.opening_missing %}известной суммы{% else %}необходимой суммы{% endif %} на {{ f.opening_gap|rub }}.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M06 · Снижение продаж</h3>
+              {% if f.scenarios %}
+                <ul>
+                  {% for scenario in f.scenarios %}
+                    <li>{{ scenario.label }} · {{ scenario.profit|rub }}/мес.{% if scenario.buffer is not None %} · запас {{ scenario.buffer }} операций{% endif %}</li>
+                  {% endfor %}
+                </ul>
+                {% if f.scenarios.0.profit|negative %}<p>Базовый сценарий уже даёт убыток.</p>{% elif f.max_drop is not None %}<p>Максимальное снижение до нулевого результата по базовому сценарию · {{ f.max_drop }} %.</p>{% endif %}
+                <p>Сверьте отрицательные сценарии с резервом и условиями аренды.</p>
+              {% else %}<p>{{ insufficient }}. Заполните выручку, затраты на операцию и постоянные расходы.</p>{% endif %}
+            </article>
+            <article class="fact-card">
+              <h3>M12 · Соответствие профилю</h3>
+              <p>{% if result.fit_score is not None %}{{ result.fit_score }} / 100{% else %}{{ insufficient }}{% endif %}. {{ result.label }}.</p>
+              <p>Проверьте недостающие подтверждения и бюджет. <a href="{% url 'objects' req.pk %}">Посмотреть, что повысит балл</a>.</p>
+            </article>
+            <article class="fact-card">
+              <h3>M14 · Достоверность данных</h3>
+              <p>Критические характеристики · подтверждено {{ evidence.confirmed }}, не подтверждено {{ evidence.unconfirmed }}, неизвестно {{ evidence.unknown }}.</p>
+              <p>Запросите актуальные источники, даты и сведения именно для помещения.</p>
+            </article>
+          </div>
+          {% if result.regulatory %}
+            <h3>Нормативные и санитарные требования</h3>
+            <ul>
+              {% for rule in result.regulatory %}
+                <li>{{ rule.title }} · {{ rule.label }}. <a href="{{ rule.document.url }}" target="_blank" rel="noopener noreferrer">{{ rule.document.title }}, {{ rule.section }}</a>. {% if rule.status == "pending" %}{{ rule.evidence }}{% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+      {% else %}
+        <p>Пересчитайте помещение, чтобы увидеть показатели по актуальным исходным данным.</p>
+      {% endif %}
+    </details>
+  {% empty %}
+    <p>Добавьте и выберите помещение для расчёта.</p>
+  {% endfor %}
+  <details>
+    <summary>Методики всех 18 показателей</summary>
+    {% for code, method in methods.items %}
+      <details>
+        <summary>{{ code }} · {{ method.name }} · {{ method.stage }}</summary>
+        {% if method.stage != "P0" %}<p>{{ insufficient }}.</p>{% endif %}
+        <p>{{ method.value }}</p>
+        <p><strong>Входные данные и источник</strong> · {{ method.inputs }} {% if method.stage == "P0" %}Данные из карточки, профиля или сценария клиента.{% endif %}</p>
+        <p><strong>Формула</strong> · {{ method.formula }}</p>
+        <p>{{ method.unit }} · Методика {{ method.version }}. {{ method.limits }}</p>
+      </details>
+    {% endfor %}
+  </details>
+</section>

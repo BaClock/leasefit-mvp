@@ -2,6 +2,8 @@ import re, uuid
 from io import BytesIO
 from PIL import Image
 from django import forms
+from .operations import CUSTOM_KINDS, STRUCTURED, normalize_value
+from .operation_forms import structured_field
 from django.db.models import Q
 from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.contrib.auth.forms import SetPasswordForm
@@ -128,6 +130,7 @@ class CharacteristicSelect(forms.Select):
                 {
                     "data-kind": value.instance.value_type,
                     "data-unit": value.instance.unit,
+                    "data-code": value.instance.code,
                 }
             )
         return option
@@ -188,6 +191,18 @@ class ObservationForm(forms.ModelForm):
             ("true", "Да"),
             ("false", "Нет"),
         ]
+        from .characteristics import STANDARD
+
+        structured_names = []
+        for spec in STANDARD:
+            if spec["value_type"] in STRUCTURED:
+                code = spec["code"]
+                field_name = "observed_" + code
+                self.fields[field_name] = structured_field(spec["value_type"], code)
+                structured_names.append(field_name)
+        self.order_fields(
+            ["characteristic", "value", "boolean", "text", *structured_names]
+        )
 
     def clean(self):
         d = super().clean()
@@ -196,10 +211,18 @@ class ObservationForm(forms.ModelForm):
         if d.get("observed_on") and d["observed_on"] > timezone.localdate():
             self.add_error("observed_on", "Дата не может быть в будущем.")
         if char:
-            value_field = {"number": "value", "boolean": "boolean", "text": "text"}[
-                char.value_type
-            ]
+            value_field = (
+                "observed_" + char.code
+                if char.value_type in STRUCTURED
+                else {"number": "value", "boolean": "boolean", "text": "text"}[
+                    char.value_type
+                ]
+            )
             val = d.get(value_field)
+            if char.value_type in STRUCTURED:
+                d["structured_value"] = (
+                    normalize_value(char.value_type, char.code, val) if val else None
+                )
             if char.value_type != "number" and d.get("value") is not None:
                 self.add_error(
                     "value",
@@ -214,19 +237,31 @@ class ObservationForm(forms.ModelForm):
                     "text",
                     "Используйте поле числа или наличия для этой характеристики.",
                 )
+            for key in tuple(d):
+                if (
+                    key.startswith("observed_")
+                    and key != "observed_on"
+                    and key != value_field
+                    and d[key]
+                ):
+                    self.add_error(
+                        key, "Выберите значение только для указанной характеристики."
+                    )
             if (
                 status
                 and status != "unknown"
                 and value_field in d
-                and val in (None, "")
+                and val in (None, "", [])
             ):
                 self.add_error(
                     value_field,
-                    "Выберите «Да» или «Нет»."
-                    if value_field == "boolean"
-                    else "Введите значение характеристики.",
+                    (
+                        "Выберите «Да» или «Нет»."
+                        if value_field == "boolean"
+                        else "Введите значение характеристики."
+                    ),
                 )
-            if status == "unknown" and val not in (None, ""):
+            if status == "unknown" and val not in (None, "", []):
                 self.add_error(
                     "status",
                     "Для известного значения выберите «Не подтверждено» или подтверждение.",
@@ -245,6 +280,7 @@ class ObservationForm(forms.ModelForm):
         obj = super().save(commit=False)
         obj.name = obj.characteristic.label
         obj.unit = obj.characteristic.unit
+        obj.structured_value = self.cleaned_data.get("structured_value")
         if commit:
             obj.save()
         return obj
@@ -507,24 +543,41 @@ class GroupedRequirementsForm(forms.Form):
                 for r in rows
             )
         }
-        for d in STANDARD:
+        self.specs = [
+            spec
+            for spec in STANDARD
+            if not (
+                self.is_bound
+                and spec["code"] + "_priority" not in self.data
+                and (
+                    spec["value_type"] in STRUCTURED
+                    or spec["code"]
+                    in {"delivery_approach", "storage_zone", "noise_limits"}
+                )
+            )
+        ]
+        for d in self.specs:
             code = d["code"]
             if code in self.ambiguous_codes:
                 continue
             r = existing.get(code, [None])[0]
             self.fields[code + "_priority"] = forms.ChoiceField(
-                label="Важность", choices=IMPORTANCE, initial=r.priority if r else "na"
+                label="Важность",
+                choices=IMPORTANCE,
+                initial=r.priority if r else "na",
+                required=d["value_type"] not in STRUCTURED
+                and code not in {"delivery_approach", "storage_zone", "noise_limits"},
             )
             if d["value_type"] == "number":
                 lo = r.minimum if r and r.operator in ["gte", "range", "eq"] else None
                 hi = (
                     r.maximum
                     if r and r.operator == "range"
-                    else r.minimum
-                    if r and r.operator == "lte"
-                    else lo
-                    if r and r.operator == "eq"
-                    else None
+                    else (
+                        r.minimum
+                        if r and r.operator == "lte"
+                        else lo if r and r.operator == "eq" else None
+                    )
                 )
                 self.fields[code + "_min"] = forms.DecimalField(
                     label="От, " + d["unit"],
@@ -547,6 +600,11 @@ class GroupedRequirementsForm(forms.Form):
                     label="Что требуется?",
                     choices=[("yes", "Наличие"), ("no", "Отсутствие")],
                     initial="no" if r and not r.expected else "yes",
+                    required=code not in {"delivery_approach", "storage_zone"},
+                )
+            elif d["value_type"] in STRUCTURED:
+                self.fields[code + "_structured"] = structured_field(
+                    d["value_type"], code, initial=r.structured_value if r else None
                 )
             else:
                 self.fields[code + "_text"] = forms.CharField(
@@ -554,14 +612,16 @@ class GroupedRequirementsForm(forms.Form):
                     required=False,
                     max_length=500,
                     initial=r.expected_text if r else "",
-                    widget=forms.Select(choices=FLOORS)
-                    if code == "floor"
-                    else forms.TextInput(),
+                    widget=(
+                        forms.Select(choices=FLOORS)
+                        if code == "floor"
+                        else forms.TextInput()
+                    ),
                 )
         self.groups = []
         for key, title in GROUPS:
             entries = []
-            for d in STANDARD:
+            for d in self.specs:
                 if d["group"] != key or d["code"] in self.ambiguous_codes:
                     continue
                 code = d["code"]
@@ -570,6 +630,10 @@ class GroupedRequirementsForm(forms.Form):
                         "label": d["label"],
                         "code": code,
                         "primary": d["primary"],
+                        "structured": d["value_type"] in STRUCTURED,
+                        "origin": (
+                            existing[code][0].origin if code in existing else "client"
+                        ),
                         "fields": [
                             self[k] for k in self.fields if k.startswith(code + "_")
                         ],
@@ -578,6 +642,11 @@ class GroupedRequirementsForm(forms.Form):
             self.groups.append(
                 {
                     "title": title,
+                    "intro": (
+                        "Укажите, каким образом посетители будут попадать в помещение, в какое время сможет работать бизнес и как будут организованы поставки."
+                        if key == "access"
+                        else ""
+                    ),
                     "primary": [e for e in entries if e["primary"]],
                     "advanced": [e for e in entries if not e["primary"]],
                 }
@@ -585,10 +654,11 @@ class GroupedRequirementsForm(forms.Form):
 
     def clean(self):
         d = super().clean()
-        for spec in STANDARD:
+        for spec in self.specs:
             code = spec["code"]
             if code in self.ambiguous_codes or d.get(code + "_priority") in [
                 None,
+                "",
                 "na",
             ]:
                 continue
@@ -605,14 +675,20 @@ class GroupedRequirementsForm(forms.Form):
                 self.add_error(
                     code + "_text", "Укажите нужное значение или выберите «Не важно»."
                 )
+            elif spec["value_type"] in STRUCTURED and not d.get(code + "_structured"):
+                self.add_error(
+                    code + "_structured", "Выберите значение или отметьте «Не важно»."
+                )
         return d
 
     def save(self, req):
-        for spec in STANDARD:
+        for spec in self.specs:
             code = spec["code"]
             if code in self.ambiguous_codes:
                 continue
             priority = self.cleaned_data[code + "_priority"]
+            if not priority:
+                continue
             char = Characteristic.objects.get(code=code)
             old = req.requirements.filter(characteristic=char).first()
             if priority == "na" and not old:
@@ -633,11 +709,11 @@ class GroupedRequirementsForm(forms.Form):
                     self.cleaned_data.get(code + "_max"),
                 )
                 values.update(
-                    operator="range"
-                    if lo is not None and hi is not None
-                    else "gte"
-                    if lo is not None
-                    else "lte",
+                    operator=(
+                        "range"
+                        if lo is not None and hi is not None
+                        else "gte" if lo is not None else "lte"
+                    ),
                     minimum=lo if lo is not None else hi,
                     maximum=hi if lo is not None else None,
                 )
@@ -646,7 +722,14 @@ class GroupedRequirementsForm(forms.Form):
                         operator=old.operator, minimum=old.minimum, maximum=old.maximum
                     )
             elif spec["value_type"] == "boolean":
-                values["expected"] = self.cleaned_data.get(code + "_expected") == "yes"
+                values["expected"] = self.cleaned_data.get(code + "_expected") != "no"
+            elif spec["value_type"] in STRUCTURED:
+                value = self.cleaned_data.get(code + "_structured")
+                values["structured_value"] = (
+                    normalize_value(spec["value_type"], code, value)
+                    if value
+                    else old.structured_value if old else None
+                )
             else:
                 values["expected_text"] = self.cleaned_data.get(code + "_text", "")
             if old:
@@ -660,7 +743,11 @@ class GroupedRequirementsForm(forms.Form):
 class CustomRequirementForm(forms.ModelForm):
     kind = forms.ChoiceField(
         label="Тип значения",
-        choices=Characteristic._meta.get_field("value_type").choices,
+        choices=[
+            (code, label)
+            for code, label in Characteristic._meta.get_field("value_type").choices
+            if code in CUSTOM_KINDS
+        ],
         initial="number",
     )
 
@@ -773,7 +860,16 @@ class ContextForm(forms.ModelForm):
 
     class Meta:
         model = RequestPremises
-        fields = ["adaptation", "other_once", "stress", "assumptions", "internal_notes"]
+        fields = [
+            "adaptation",
+            "equipment",
+            "initial_stock",
+            "other_once",
+            "cash_reserve",
+            "stress",
+            "assumptions",
+            "internal_notes",
+        ]
         widgets = {
             "assumptions": forms.Textarea(attrs={"rows": 3}),
             "internal_notes": forms.Textarea(attrs={"rows": 3}),
@@ -782,6 +878,10 @@ class ContextForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.initial["version"] = self.instance.version
+        if self.is_bound:
+            for name in ("equipment", "initial_stock", "cash_reserve"):
+                if name not in self.data:
+                    self.fields[name].disabled = True
 
 
 class CharacteristicForm(forms.Form):

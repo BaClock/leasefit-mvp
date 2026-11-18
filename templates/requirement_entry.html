@@ -1,5 +1,6 @@
-<div class="requirement-entry">
+<div class="requirement-entry"{% if entry.structured %} data-operating-requirement{% endif %}>
   <h3>{{ entry.label }}</h3>
+  {% if entry.origin != "client" %}<p class="muted">Рекомендация шаблона · {{ entry.origin }}</p>{% endif %}
   <div class="entry-fields">
     {% for field in entry.fields %}
       <div class="field">

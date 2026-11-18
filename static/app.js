@@ -101,6 +101,18 @@ document.addEventListener("DOMContentLoaded", () => {
       input.required = active && valueRequired;
       input.closest(".field").hidden = !active;
     }
+    for (const field of form.querySelectorAll(".field")) {
+      const inputs = [...field.querySelectorAll('[name^="observed_"]')].filter(
+        (input) => input.name !== "observed_on",
+      );
+      if (!inputs.length) continue;
+      const observed = "observed_" + option?.dataset.code;
+      const active = inputs.some(
+        (input) => input.name === observed || input.name.startsWith(observed + "_"),
+      );
+      field.hidden = !active;
+      for (const input of inputs) input.disabled = !active;
+    }
     confirmation.required = status.value === "confirmed";
     const label = form.elements
       .namedItem("value")
@@ -112,4 +124,35 @@ document.addEventListener("DOMContentLoaded", () => {
   select.addEventListener("change", sync);
   status.addEventListener("change", sync);
   sync();
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  for (const schedule of document.querySelectorAll("[data-weekly-schedule]")) {
+    const mode = schedule.querySelector("[data-schedule-mode]");
+    const sync = () => {
+      schedule.querySelector("[data-weekly-hours]").hidden = mode.value !== "weekly";
+    };
+    mode.addEventListener("change", sync);
+    sync();
+  }
+  for (const entry of document.querySelectorAll("[data-operating-requirement]")) {
+    const priority = entry.querySelector('select[name$="_priority"]');
+    const sync = () => {
+      for (const field of entry.querySelectorAll(".entry-fields > .field")) {
+        if (!field.contains(priority)) field.hidden = priority.value === "na";
+      }
+    };
+    priority.addEventListener("change", sync);
+    sync();
+  }
+  for (const form of document.querySelectorAll("[data-business-setup]")) {
+    const format = form.elements.namedItem("business_format");
+    const sync = () => {
+      for (const questions of form.querySelectorAll("[data-business-category]")) {
+        questions.hidden = format.value.split(".")[0] !== questions.dataset.businessCategory;
+      }
+    };
+    format.addEventListener("change", sync);
+    sync();
+  }
 });

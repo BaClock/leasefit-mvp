@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "request_header.html" %}
+  <section class="panel">
+    <h2>Категория бизнеса и требования</h2>
+    <p>Ответьте на вопросы о работе бизнеса. Перед применением можно проверить список рекомендаций.</p>
+    <form method="post" data-business-setup>
+      {% csrf_token %}
+      <fieldset {% if not can_edit %}disabled{% endif %}>
+        <div class="field">{{ form.business_format.label_tag }}{{ form.business_format }}{{ form.business_format.errors }}</div>
+        {% for category, fields in form.questions.items %}
+          <div data-business-category="{{ category }}">
+            <div class="form-grid">
+              {% for field in fields %}
+                <div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}</div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+        <div class="form-grid">
+          {% for field in form.operating_questions %}
+            <div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}</div>
+          {% endfor %}
+        </div>
+        <button name="action" value="preview">Посмотреть рекомендации</button>
+      </fieldset>
+    </form>
+  </section>
+  {% if preview %}
+    <section class="panel">
+      <h2>Рекомендации для формата «{{ format_label }}»</h2>
+      <p>Эти редактируемые рекомендации добавятся как желательные. Действующие санитарные нормы проверяются отдельно.</p>
+      <ul>
+        {% for label, value in choices %}
+          <li>{{ label }} · {{ value }}</li>
+        {% empty %}
+          <li>Для добавления новых рекомендаций нет. Можно сохранить выбранный формат и ответы.</li>
+        {% endfor %}
+      </ul>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="preview" value="{{ preview }}">
+        {% if confirm_category %}
+          <label class="inline"><input type="checkbox" name="confirm_category" value="yes" required> Подтверждаю смену категории с сохранением существующих требований</label>
+        {% endif %}
+        <button name="action" value="apply">Применить шаблон</button>
+      </form>
+    </section>
+  {% endif %}
+  <div class="actions">
+    <a class="button secondary" href="{% url 'profile' req.pk %}">К профилю</a>
+    <a class="button secondary" href="{% url 'refine' req.pk %}">К уточнениям</a>
+  </div>
+{% endblock %}

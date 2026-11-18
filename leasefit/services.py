@@ -3,10 +3,21 @@ from collections import defaultdict
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Prefetch
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from .models import *
+from .operations import (
+    LEGACY_BY_REPLACEMENT,
+    STRUCTURED,
+    matches,
+    normalize_value,
+    value_label,
+    weekly_coverage,
+)
+from .metrics import financial_metrics, evidence_summary
+from .regulations import regulatory_checklist
 
-RULES_VERSION = "p0-2.1"
+RULES_VERSION = "p0-3.0"
 LABELS = {
     "blocker": "Не соответствует · подтверждённый блокер",
     "clarify": "Требует уточнения",
@@ -37,14 +48,22 @@ def audit(user, action, resource):
     )
 
 
-def source_snapshot(o):
+def source_snapshot(o, structured_label=None):
     return {
         "id": o.pk,
-        "value": str(o.value)
-        if o.value is not None
-        else ("да" if o.boolean else "нет")
-        if o.boolean is not None
-        else o.text or "неизвестно",
+        "value": (
+            structured_label
+            if structured_label is not None
+            else (
+                str(o.value)
+                if o.value is not None
+                else (
+                    ("да" if o.boolean else "нет")
+                    if o.boolean is not None
+                    else o.text or "неизвестно"
+                )
+            )
+        ),
         "unit": o.unit,
         "scope": o.get_scope_display(),
         "locator": o.locator,
@@ -55,6 +74,11 @@ def source_snapshot(o):
         "status": o.get_status_display(),
         "confirmation": o.confirmation,
         "superseded": o.superseded,
+        "has_value": (
+            structured_label != "неизвестно"
+            if structured_label is not None
+            else o.value is not None or o.boolean is not None or bool(o.text.strip())
+        ),
     }
 
 
@@ -76,32 +100,35 @@ def normalized_text(code, value):
 def check_requirement(req, p, *, observations=None):
     if observations is None:
         observations = list(
-            p.observations.filter(characteristic_id=req.characteristic_id).order_by("id")
+            p.observations.filter(characteristic_id=req.characteristic_id).order_by(
+                "id"
+            )
         )
     kind = req.characteristic.value_type
+    if kind in STRUCTURED:
+        return check_structured_requirement(req, observations)
     live = [o for o in observations if not o.superseded]
     sources = [source_snapshot(o) for o in observations]
     reason = "Нет актуального подтверждённого значения для помещения."
     status = "clarify"
+    adjustment = ""
     comparable = [
         o for o in live if o.scope == "premises" and o.source_type != "archive"
     ]
     values = {
         (
-            o.value
-            if kind == "number"
-            else o.boolean
-            if kind == "boolean"
-            else o.text.strip().casefold(),
+            (
+                o.value
+                if kind == "number"
+                else o.boolean if kind == "boolean" else o.text.strip().casefold()
+            ),
             o.unit,
         )
         for o in comparable
         if (
             o.value is not None
             if kind == "number"
-            else o.boolean is not None
-            if kind == "boolean"
-            else bool(o.text.strip())
+            else o.boolean is not None if kind == "boolean" else bool(o.text.strip())
         )
     }
     conflict = any(o.status == "conflict" for o in live) or len(values) > 1
@@ -131,9 +158,9 @@ def check_requirement(req, p, *, observations=None):
             and (
                 o.value is not None
                 if kind == "number"
-                else o.boolean is not None
-                if kind == "boolean"
-                else bool(o.text.strip())
+                else (
+                    o.boolean is not None if kind == "boolean" else bool(o.text.strip())
+                )
             )
         ]
         if confirmed:
@@ -141,17 +168,23 @@ def check_requirement(req, p, *, observations=None):
             good = (
                 (o.boolean == req.expected)
                 if kind == "boolean"
-                else normalized_text(req.characteristic.code, o.text)
-                == normalized_text(req.characteristic.code, req.expected_text)
-                if kind == "text"
                 else (
-                    o.value == req.minimum
-                    if req.operator == "eq"
-                    else o.value >= req.minimum
-                    if req.operator == "gte"
-                    else o.value <= req.minimum
-                    if req.operator == "lte"
-                    else req.minimum <= o.value <= req.maximum
+                    normalized_text(req.characteristic.code, o.text)
+                    == normalized_text(req.characteristic.code, req.expected_text)
+                    if kind == "text"
+                    else (
+                        o.value == req.minimum
+                        if req.operator == "eq"
+                        else (
+                            o.value >= req.minimum
+                            if req.operator == "gte"
+                            else (
+                                o.value <= req.minimum
+                                if req.operator == "lte"
+                                else req.minimum <= o.value <= req.maximum
+                            )
+                        )
+                    )
                 )
             )
             status = (
@@ -164,8 +197,94 @@ def check_requirement(req, p, *, observations=None):
                 if good
                 else "Подтверждённое значение не соответствует требованию."
             )
+            if not good and kind == "number":
+                ceiling = req.maximum if req.operator == "range" else req.minimum
+                if req.operator in ("gte", "range", "eq") and o.value < req.minimum:
+                    adjustment = f"Не хватает {req.minimum - o.value:g} {req.unit}."
+                elif req.operator in ("lte", "range", "eq") and o.value > ceiling:
+                    adjustment = f"Превышение на {o.value - ceiling:g} {req.unit}."
         elif live:
             reason = "Значение не подтверждено для всего помещения в текущем состоянии. Архив, объявление, комната и здание требуют уточнения; единицы должны совпадать."
+    return requirement_result(req, status, reason, sources, adjustment)
+
+
+def check_structured_requirement(req, observations):
+    kind = req.characteristic.value_type
+    code = req.characteristic.code
+    sources = []
+    available = []
+    for observation in observations:
+        try:
+            value = normalize_value(kind, code, observation.structured_value)
+        except ValidationError:
+            value = None
+        sources.append(
+            source_snapshot(observation, value_label(kind, code, value) or "неизвестно")
+        )
+        if (
+            value is not None
+            and not observation.superseded
+            and observation.scope == "premises"
+            and observation.source_type != "archive"
+        ):
+            available.append((observation, value))
+
+    try:
+        expected = normalize_value(kind, code, req.structured_value)
+    except ValidationError:
+        return requirement_result(
+            req, "clarify", "Укажите точное условие в профиле.", sources
+        )
+    if req.operator != "eq" or req.unit != req.characteristic.unit:
+        return requirement_result(
+            req, "clarify", "Уточните тип сравнения или единицу в профиле.", sources
+        )
+    signatures = {
+        (
+            tuple(weekly_coverage(value))
+            if kind == "time_schedule"
+            else tuple(value) if kind == "multi_select" else value
+        )
+        for _, value in available
+    }
+    if len(signatures) > 1 or any(
+        o.status == "conflict" and not o.superseded for o in observations
+    ):
+        return requirement_result(
+            req,
+            "clarify",
+            "Источники противоречат друг другу. Выберите актуальный источник.",
+            sources,
+        )
+    for observation, value in reversed(available):
+        if (
+            observation.status == "confirmed"
+            and observation.source_type != "listing"
+            and observation.confirmation
+        ):
+            if matches(kind, expected, value):
+                return requirement_result(
+                    req,
+                    "pass",
+                    "Подтверждённые условия покрывают запрос клиента.",
+                    sources,
+                )
+            status = "blocker" if req.priority == "required" else "desired_fail"
+            return requirement_result(
+                req,
+                status,
+                "Подтверждённые условия не покрывают запрос клиента.",
+                sources,
+            )
+    return requirement_result(
+        req,
+        "clarify",
+        "Запросите подтверждение конкретного режима для всего помещения. Прежнее общее «Да» не подтверждает график или способ доступа.",
+        sources,
+    )
+
+
+def requirement_result(req, status, reason, sources, adjustment=""):
     question = (
         f"Подтвердите для этого помещения: {req}. Укажите актуальный документ или ответ собственника, дату и единицу."
         if status == "clarify"
@@ -185,6 +304,7 @@ def check_requirement(req, p, *, observations=None):
         "characteristic_id": req.characteristic_id,
         "code": req.characteristic.code,
         "reason": reason,
+        "adjustment": adjustment,
         "question": question,
         "sources": sources,
         "value": "; ".join(
@@ -197,7 +317,9 @@ def check_requirement(req, p, *, observations=None):
 
 def economics(p, request_obj=None, *, context=None):
     if context is None and request_obj is not None:
-        context = RequestPremises.objects.filter(premises=p, request=request_obj).first()
+        context = RequestPremises.objects.filter(
+            premises=p, request=request_obj
+        ).first()
     zero = Decimal("0")
     missing = []
     monthly = []
@@ -250,9 +372,11 @@ def economics(p, request_obj=None, *, context=None):
         else (
             "Превышение " + money_text(gap)
             if gap > 0
-            else "Известный подытог ниже лимита; итог не определён"
-            if missing
-            else "В пределах месячного лимита"
+            else (
+                "Известный подытог ниже лимита; итог не определён"
+                if missing
+                else "В пределах месячного лимита"
+            )
         )
     )
     others = [p.operating, p.utilities, p.other_monthly]
@@ -287,9 +411,11 @@ def economics(p, request_obj=None, *, context=None):
             "allowed_rent": allowed,
             "stress_total": total + (context.stress if context else zero),
             "stress_addition": context.stress if context else zero,
-            "start_gap": once_total - request_obj.start_budget
-            if request_obj and request_obj.start_budget is not None
-            else None,
+            "start_gap": (
+                once_total - request_obj.start_budget
+                if request_obj and request_obj.start_budget is not None
+                else None
+            ),
             "assumptions": "\n".join(
                 filter(None, [p.lease_terms, context.assumptions if context else ""])
             ),
@@ -297,9 +423,9 @@ def economics(p, request_obj=None, *, context=None):
                 "source": p.commercial_source
                 or "Источник не указан — расчёт по ручным вводным",
                 "type": p.get_commercial_source_type_display(),
-                "date": str(p.commercial_date)
-                if p.commercial_date
-                else "Дата неизвестна",
+                "date": (
+                    str(p.commercial_date) if p.commercial_date else "Дата неизвестна"
+                ),
                 "status": p.get_commercial_status_display(),
                 "confirmation": p.commercial_confirmation,
                 "scope": "Помещение / блок",
@@ -310,11 +436,25 @@ def economics(p, request_obj=None, *, context=None):
 
 
 def active_requirements(req):
-    return (
+    requirements = list(
         req.requirements.exclude(priority="na")
         .select_related("characteristic")
         .order_by("id")
     )
+    replacements = {
+        legacy: row.priority
+        for row in requirements
+        for legacy in LEGACY_BY_REPLACEMENT.get(row.characteristic.code, ())
+    }
+    return [
+        row
+        for row in requirements
+        if row.characteristic.code not in replacements
+        or (
+            row.priority == "required"
+            and replacements[row.characteristic.code] != "required"
+        )
+    ]
 
 
 def assess_requirements(p, requirements, observations):
@@ -329,9 +469,11 @@ def assess_requirements(p, requirements, observations):
     status = (
         "blocker"
         if any(r["status"] == "blocker" for r in mandatory)
-        else "clarify"
-        if not mandatory or any(r["status"] == "clarify" for r in mandatory)
-        else "pass"
+        else (
+            "clarify"
+            if not mandatory or any(r["status"] == "clarify" for r in mandatory)
+            else "pass"
+        )
     )
     return status, rows
 
@@ -419,12 +561,18 @@ def rank_premises(req):
                 risks.append(
                     {
                         "title": "Месячный бюджет",
-                        "label": costs["budget_label"] if over_budget else "Требует уточнения",
+                        "label": (
+                            costs["budget_label"]
+                            if over_budget
+                            else "Требует уточнения"
+                        ),
                         "reason": ", ".join(costs["missing"]),
                     }
                 )
                 if costs["complete"]:
-                    budget_action = f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
+                    budget_action = (
+                        f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
+                    )
                 else:
                     budget_action = "Уточните полную месячную нагрузку."
                     if over_budget:
@@ -471,11 +619,19 @@ def evaluate(p, user, request_obj):
         characteristic_id__in={r.characteristic_id for r in requirements}
     ).order_by("id")
     status, rows = assess_requirements(p, requirements, observations)
+    costs = economics(p, req, context=context)
+    budget_met = (
+        None if req.budget is None else costs["complete"] and Decimal(costs["gap"]) <= 0
+    )
     result = {
         "status": status,
         "label": LABELS[status],
         "rows": rows,
-        "economics": economics(p, req, context=context),
+        "economics": costs,
+        "financial": serial(financial_metrics(req, p, context, costs)),
+        "fit_score": suitability_rating(rows, budget_met)[0],
+        "evidence_summary": evidence_summary(rows),
+        "regulatory": regulatory_checklist(req, context),
     }
     latest = p.evaluations.filter(request=req).order_by("-id").first()
     if (
@@ -524,7 +680,7 @@ def report_snapshot(req, objects, comment, parameters=None):
         else set(parameters) & set(dict(report_parameter_choices(req)))
     )
     mandatory_ids = set(
-        req.requirements.filter(priority="required").values_list("id", flat=True)
+        r.pk for r in active_requirements(req) if r.priority == "required"
     )
     wanted_ids = mandatory_ids | {
         r.pk
@@ -575,14 +731,13 @@ def report_snapshot(req, objects, comment, parameters=None):
             "rules_version": RULES_VERSION,
             "request": req.title,
             "city": req.city,
-            "business": req.business,
+            "business": req.business_format_label,
             "budget": req.budget,
             "start_budget": req.start_budget,
             "geography": req.geography,
             "profile_version": req.version,
             "requirements": [
-                f"{r.get_priority_display()}: {r}"
-                for r in req.requirements.exclude(priority="na")
+                f"{r.get_priority_display()}: {r}" for r in active_requirements(req)
             ],
             "objects": items,
             "comment": comment,
@@ -651,11 +806,7 @@ def compare_rows(objects, differences=False, request_obj=None):
     # A missing evaluation is never presented as a current recommendation.
     evaluations = [current_evaluation(p, request_obj) for p in objects]
     rows = []
-    for i, req in (
-        enumerate(request_obj.requirements.exclude(priority="na").order_by("id"))
-        if objects
-        else []
-    ):
+    for i, req in enumerate(active_requirements(request_obj)) if objects else []:
         cells = []
         critical = False
         for ev in evaluations:

@@ -82,6 +82,11 @@ urlpatterns = [
         name="request_context",
     ),
     path(
+        "app/requests/<int:pk>/objects/<int:object_id>/regulatory-review",
+        v.regulatory_review,
+        name="regulatory_review",
+    ),
+    path(
         "app/requests/<int:pk>/template",
         v.apply_business_template,
         name="business_template",
@@ -91,6 +96,8 @@ urlpatterns = [
     path("app/requests", v.requests_list, name="requests"),
     path("app/requests/new", v.profile, name="request_new"),
     path("app/requests/<int:pk>/profile", v.profile, name="profile"),
+    path("app/requests/<int:pk>/business", v.business_setup, name="business_setup"),
+    path("app/requests/<int:pk>/finance", v.financial_plan, name="financial_plan"),
     path("app/requests/<int:pk>/delete", v.delete_request, name="delete_request"),
     path("app/requests/<int:pk>/state", v.lifecycle, name="lifecycle"),
     path("app/requests/<int:pk>/objects", v.objects, name="objects"),

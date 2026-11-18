@@ -54,6 +54,9 @@ class ClientRequest(models.Model):
     title = models.CharField("Название запроса", max_length=180)
     city = models.CharField("Город", max_length=120, default="Новосибирск")
     business = models.CharField("Формат бизнеса", max_length=160, default="Кофейня")
+    business_format = models.CharField(max_length=40, blank=True)
+    business_answers = models.JSONField(default=dict, blank=True)
+    financial_plan = models.JSONField(default=dict, blank=True)
     geography = models.CharField("Районы / ориентиры", max_length=250, blank=True)
     budget = models.DecimalField("Лимит в месяц, ₽", **money)
     start_budget = models.DecimalField("Бюджет на старт, ₽", **money)
@@ -76,6 +79,13 @@ class ClientRequest(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def business_format_label(self):
+        from .business import FORMATS
+
+        spec = FORMATS.get(self.business_format)
+        return spec.label if spec else self.business
+
 
 class Characteristic(models.Model):
     code = models.SlugField(max_length=90, unique=True)
@@ -85,13 +95,20 @@ class Characteristic(models.Model):
         choices=[
             ("layout", "Площадь и планировка"),
             ("engineering", "Инженерные коммуникации"),
-            ("access", "Доступность и эксплуатация"),
+            ("access", "Условия доступа и работы помещения"),
             ("custom", "Дополнительные требования"),
         ],
     )
     value_type = models.CharField(
-        max_length=12,
-        choices=[("number", "Число"), ("boolean", "Да / нет"), ("text", "Текст")],
+        max_length=16,
+        choices=[
+            ("number", "Число"),
+            ("boolean", "Да / нет"),
+            ("text", "Текст"),
+            ("enum", "Вариант"),
+            ("multi_select", "Несколько вариантов"),
+            ("time_schedule", "График"),
+        ],
     )
     unit = models.CharField(max_length=25, blank=True)
     allowed_operators = models.JSONField(default=list)
@@ -114,6 +131,8 @@ class Requirement(models.Model):
     characteristic = models.ForeignKey(Characteristic, on_delete=models.PROTECT)
     name = models.CharField("Параметр", max_length=100)
     expected_text = models.CharField("Требуемое значение", max_length=500, blank=True)
+    structured_value = models.JSONField(null=True, blank=True)
+    origin = models.CharField(max_length=80, default="client")
     unit = models.CharField("Единица", max_length=25, blank=True)
     operator = models.CharField(
         "Оператор", max_length=8, choices=OPERATORS, default="gte"
@@ -134,6 +153,15 @@ class Requirement(models.Model):
 
     def __str__(self):
         if self.operator == "eq":
+            from .operations import STRUCTURED, value_label
+
+            if self.characteristic.value_type in STRUCTURED:
+                value = value_label(
+                    self.characteristic.value_type,
+                    self.characteristic.code,
+                    self.structured_value,
+                )
+                return f"{self.name}: {value or 'не задано'}"
             if self.characteristic.value_type == "boolean":
                 return f"{self.name}: {'да' if self.expected else 'нет'}"
             if self.characteristic.value_type == "text":
@@ -153,11 +181,11 @@ class Requirement(models.Model):
                 self.request.agency_id,
                 self.name,
                 self.unit,
-                "boolean"
-                if self.operator == "eq" and not self.expected_text
-                else "text"
-                if self.expected_text
-                else "number",
+                (
+                    "boolean"
+                    if self.operator == "eq" and not self.expected_text
+                    else "text" if self.expected_text else "number"
+                ),
             )
         return super().save(*args, **kwargs)
 
@@ -265,6 +293,10 @@ class RequestPremises(models.Model):
     )
     adaptation = models.DecimalField("Ремонт / адаптация для клиента, ₽", **money)
     other_once = models.DecimalField("Прочие стартовые затраты клиента, ₽", **money)
+    equipment = models.DecimalField("Оборудование, ₽", **money)
+    initial_stock = models.DecimalField("Первоначальные закупки, ₽", **money)
+    cash_reserve = models.DecimalField("Кассовый резерв, ₽", **money)
+    regulatory_reviews = models.JSONField(default=dict, blank=True)
     stress = models.DecimalField(
         "Допущение клиента: увеличение расходов, ₽/мес.",
         max_digits=14,
@@ -341,6 +373,7 @@ class Observation(models.Model):
     text = models.CharField(
         "Текст / дополнительное значение", max_length=500, blank=True
     )
+    structured_value = models.JSONField(null=True, blank=True)
     unit = models.CharField("Единица", max_length=25, blank=True)
     scope = models.CharField(
         "Уровень сведений", max_length=12, choices=SCOPES, default="premises"
@@ -363,6 +396,18 @@ class Observation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
 
+    @property
+    def structure_display(self):
+        from .operations import value_label
+
+        if self.structured_value is not None:
+            return value_label(
+                self.characteristic.value_type,
+                self.characteristic.code,
+                self.structured_value,
+            )
+        return ""
+
     def save(self, *args, **kwargs):
         if not self.characteristic_id:
             from .characteristics import resolve_characteristic
@@ -371,11 +416,11 @@ class Observation(models.Model):
                 self.premises.agency_id,
                 self.name,
                 self.unit,
-                "number"
-                if self.value is not None
-                else "boolean"
-                if self.boolean is not None
-                else "text",
+                (
+                    "number"
+                    if self.value is not None
+                    else "boolean" if self.boolean is not None else "text"
+                ),
             )
         return super().save(*args, **kwargs)
 

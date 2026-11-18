@@ -6,7 +6,7 @@ import re
 GROUPS = [
     ("layout", "Площадь и планировка"),
     ("engineering", "Инженерные коммуникации"),
-    ("access", "Доступность и эксплуатация"),
+    ("access", "Условия доступа и работы помещения"),
 ]
 
 
@@ -121,7 +121,41 @@ STANDARD = [
     definition(
         "use_restrictions", "Ограничения по использованию помещения", "access", "text"
     ),
+    definition(
+        "visitor_entry",
+        "Как посетители должны попадать в помещение?",
+        "access",
+        "enum",
+        primary=True,
+    ),
+    definition(
+        "operating_schedule",
+        "В какое время бизнес должен иметь возможность работать?",
+        "access",
+        "time_schedule",
+        primary=True,
+    ),
+    definition(
+        "unloading_methods",
+        "Какой способ разгрузки необходим?",
+        "access",
+        "multi_select",
+        primary=True,
+    ),
+    definition(
+        "delivery_vehicles", "Тип транспорта для поставок", "access", "multi_select"
+    ),
+    definition(
+        "delivery_schedule", "Разрешённые часы поставок", "access", "time_schedule"
+    ),
+    definition("delivery_approach", "Подъезд непосредственно к входу", "access"),
+    definition("noise_limits", "Ограничения по шуму", "access", "text"),
+    definition("storage_zone", "Зона хранения", "layout"),
 ]
+LEGACY_ACCESS = {"visitor_access", "working_hours", "loading_access", "access_24h"}
+for spec in STANDARD:
+    if spec["code"] in LEGACY_ACCESS:
+        spec["primary"] = False
 BY_CODE = {d["code"]: d for d in STANDARD}
 
 
@@ -163,8 +197,8 @@ def resolve_characteristic(agency_id, name, unit="", kind="number"):
             "value_type": kind,
             "unit": unit,
             "agency_id": agency_id,
-            "allowed_operators": ["gte", "lte", "range", "eq"]
-            if kind == "number"
-            else ["eq"],
+            "allowed_operators": (
+                ["gte", "lte", "range", "eq"] if kind == "number" else ["eq"]
+            ),
         },
     )[0]

@@ -1,0 +1,51 @@
+{% load l10n %}
+{% if rules %}
+  <section class="panel" id="normative-checklist">
+    <h2>Нормативные и санитарные требования</h2>
+    <p>Предварительный чек-лист для формата «{{ req.business_format_label }}». Итоговое заключение даёт профильный специалист по документам и объекту.</p>
+    {% for rule in rules %}
+      <details>
+        <summary>{{ rule.title }} · {{ rule.label }}</summary>
+        <p>{{ rule.applicability }}</p>
+        <p>{{ rule.document.legal_status }}. {{ rule.document.revision }}.</p>
+        <p><strong>Необходимые сведения</strong> · {{ rule.characteristics }}</p>
+        <p><strong>Что проверить</strong> · {{ rule.method }}</p>
+        <p>{{ rule.evidence }}</p>
+        <p>Реестр {{ rule.registry }} · проверено {{ rule.checked_on }}. <a href="{{ rule.document.url }}" target="_blank" rel="noopener noreferrer">{{ rule.document.title }}, {{ rule.section }}</a></p>
+        {% if rule.note %}<p>Основание проверки · {{ rule.note }}</p>{% endif %}
+        {% if review_link and can_edit and rule.reviewable %}
+          <form method="post" action="{% url 'regulatory_review' req.pk review_link.premises_id %}">
+            {% csrf_token %}
+            <input type="hidden" name="rule" value="{{ rule.code }}">
+            <input type="hidden" name="version" value="{{ review_link.version|unlocalize }}">
+            <input type="hidden" name="profile_version" value="{{ req.version|unlocalize }}">
+            <input type="hidden" name="premises_version" value="{{ review_link.premises.version|unlocalize }}">
+            <div class="form-grid">
+              <div class="field">
+                <label for="review-{{ rule.code }}">Статус по документам</label>
+                <select name="status" id="review-{{ rule.code }}">
+                  {% for code, label in regulatory_status.items %}
+                    <option value="{{ code }}"{% if code == rule.status %} selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="proof-{{ rule.code }}">Документ или основание</label>
+                <input name="note" id="proof-{{ rule.code }}" value="{{ rule.note }}" maxlength="700">
+              </div>
+            </div>
+            <button class="secondary">Сохранить отметку</button>
+          </form>
+        {% endif %}
+      </details>
+    {% endfor %}
+    <details>
+      <summary>Требует нормативного уточнения</summary>
+      <ul>
+        {% for name, url, explanation in regulatory_references %}
+          <li>{{ explanation }} <a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ name }}</a></li>
+        {% endfor %}
+      </ul>
+    </details>
+  </section>
+{% endif %}

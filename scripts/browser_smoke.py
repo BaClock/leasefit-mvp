@@ -97,7 +97,9 @@ with sync_playwright() as pw:
         page.wait_for_url(re.compile(r"/app/premises/\d+$"))
         ids.append(page.url.rsplit("/", 1)[1])
         enter_power(power, "Первый условный акт")
-    page.goto(base + f"/app/premises/{ids[0]}?characteristic=water_supply#evidence-form")
+    page.goto(
+        base + f"/app/premises/{ids[0]}?characteristic=water_supply#evidence-form"
+    )
     evidence = page.locator("#evidence-form form").first
     water_value = evidence.locator("#id_boolean")
     evidence.locator("#id_status").select_option("confirmed")
@@ -111,6 +113,19 @@ with sync_playwright() as pw:
     evidence.locator("#id_confirmation").fill("Подтверждено в письменном ответе")
     evidence.get_by_role("button", name="Сохранить сведения").click()
     expect(page.get_by_role("status").first).to_contain_text("Сведения сохранены")
+    page.goto(
+        base + f"/app/premises/{ids[0]}?characteristic=operating_schedule#evidence-form"
+    )
+    schedule = page.locator("#evidence-form form").first
+    schedule.locator("#id_observed_operating_schedule_0").select_option("weekly")
+    schedule.locator("#id_observed_operating_schedule_13").fill("22:00")
+    schedule.locator("#id_observed_operating_schedule_14").fill("02:00")
+    schedule.locator("#id_source").fill("Вымышленный регламент доступа")
+    schedule.locator("#id_status").select_option("confirmed")
+    schedule.locator("#id_confirmation").fill("Тестовое подтверждение часов")
+    schedule.get_by_role("button", name="Сохранить сведения").click()
+    expect(page.get_by_role("status").first).to_contain_text("Сведения сохранены")
+    expect(page.locator("main")).to_contain_text("Вс 22:00–02:00")
     page.goto(base + "/app/premises?q=" + tag)
     capture("list")
     expect(page.locator("main")).to_contain_text("Общий вариант А")
@@ -144,6 +159,24 @@ with sync_playwright() as pw:
     for p_id in ids:
         page.locator(f'input[name=objects][value="{p_id}"]').check()
     page.get_by_role("button", name="Добавить выбранные без копирования").click()
+    page.goto(base + f"/app/requests/{coffee}/business")
+    page.locator("#id_business_format").select_option("food.cafe_kitchen")
+    page.locator("#id_preparation").select_option("yes")
+    page.locator("#id_operating_schedule_0").select_option("weekly")
+    page.locator("#id_operating_schedule_1").fill("09:00")
+    page.locator("#id_operating_schedule_2").fill("22:00")
+    page.get_by_role("button", name="Посмотреть рекомендации").click()
+    expect(
+        page.get_by_role(
+            "heading", name="Рекомендации для формата «Кафе с собственной кухней»"
+        )
+    ).to_be_visible()
+    page.locator('input[name="confirm_category"]').check()
+    page.get_by_role("button", name="Применить шаблон").click()
+    expect(
+        page.get_by_role("heading", name="Нормативные и санитарные требования")
+    ).to_be_visible()
+    page.goto(base + f"/app/requests/{coffee}/objects")
     ranking = page.get_by_role("table", name="Топ помещений")
     ranked_rows = ranking.locator("tbody tr")
     expect(ranked_rows).to_have_count(2)
@@ -153,7 +186,9 @@ with sync_playwright() as pw:
     low_power.get_by_text("Причины и риски").click()
     expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
     low_power.get_by_text("Что повысит балл").click()
-    expect(low_power.get_by_text("Снизьте расходы на 3 000 ₽ в месяц.", exact=False)).to_be_visible()
+    expect(
+        low_power.get_by_text("Снизьте расходы на 3 000 ₽ в месяц.", exact=False)
+    ).to_be_visible()
     capture("ranking")
     low_power.get_by_role("link", name="Месячный бюджет").click()
     expect(page.locator("#commercial-terms")).to_have_attribute("open", "")
@@ -178,10 +213,22 @@ with sync_playwright() as pw:
     }.items():
         form.locator("#id_" + key).fill(str(value))
     form.get_by_role("button", name="Сохранить условия запроса").click()
+    page.goto(base + f"/app/requests/{coffee}/finance")
+    for name, value in {
+        "revenue": 500000,
+        "average": 500,
+        "variable": 200,
+        "fixed": 130000,
+        "working_days": 25,
+        "custom_drop": 30,
+    }.items():
+        page.locator("#id_" + name).fill(str(value))
+    page.get_by_role("button", name="Сохранить сценарий").click()
     page.goto(base + f"/app/requests/{coffee}/compare")
     page.get_by_role("button", name="↻ Проверить / пересчитать выбранные").click()
     expect(page.locator("main")).to_contain_text("Не соответствует")
     expect(page.locator("main")).to_contain_text("Превышение 3 000")
+    expect(page.locator("main")).to_contain_text("677 операций в месяц")
     page.locator(
         '.report-parameters button[data-parameter="economics:monthly"]'
     ).click()
@@ -229,5 +276,5 @@ with sync_playwright() as pw:
     context.close()
     browser.close()
 print(
-    "PASS: catalog and manual creation → ranked options and risks → grouped requirements → shared use in coffee/PVZ with different results → common update and stale evaluations → unlink without deleting → unchanged issued PDF; 1440/768/390 px; no JS errors or page overflow."
+    "PASS: catalog, overnight schedule, business template preview, regulatory checklist, financial scenario, ranking, shared use and immutable PDF; 1440/768/390 px; no JS errors or page overflow."
 )

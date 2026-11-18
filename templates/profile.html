@@ -19,7 +19,11 @@
                 <option value="Салон красоты">
                   <option value="Офис">
                   </datalist>
-                  <p class="hint">Смена формата бизнеса не заменяет ваши требования. Примерный шаблон можно добавить отдельно после сохранения.</p>
+                  {% if req.pk %}
+                    <p>Категория бизнеса · {{ req.business_format_label }}</p>
+                    <a class="button secondary" href="{% url 'business_setup' req.pk %}">Категория и шаблон требований</a>
+                    <a class="button secondary" href="{% url 'financial_plan' req.pk %}">Финансовый сценарий</a>
+                  {% endif %}
                 </section>
                 <h2>Требования к помещению</h2>
                 <p class="lead">Укажите характеристики, необходимые для бизнеса клиента. Система проверит, какие помещения соответствуют этим условиям.</p>
@@ -28,6 +32,7 @@
                 {% for group in grouped.groups %}
                   <section class="panel requirement-group">
                     <h2>{{ group.title }}</h2>
+                    {% if group.intro %}<p>{{ group.intro }}</p>{% endif %}
                     <div class="form-grid">
                       {% for entry in group.primary %}
                         {% include "requirement_entry.html" %}
@@ -56,10 +61,12 @@
                   </details>
                 </section>
                 <div class="actions">
+                  {% if new %}<button name="next" value="business">Далее: выбрать бизнес →</button>{% endif %}
                   <button>Далее: уточнить профиль →</button>
                 </div>
               </fieldset>
             </form>
+            {% include "regulatory.html" with rules=regulatory %}
             {% if req.pk %}
               {% if can_edit %}
                 <section class="panel">

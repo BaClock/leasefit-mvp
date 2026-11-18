@@ -15,6 +15,18 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.core.exceptions import PermissionDenied
+from django.core import signing
+from .business import FORMATS, TEMPLATE_VERSION, recommendations
+from .business_forms import BusinessSetupForm
+from .metric_forms import FinancialPlanForm
+from .metrics import METHODS, INSUFFICIENT
+from .regulations import (
+    REFERENCES,
+    REGISTRY_VERSION,
+    STATUS as REGULATORY_STATUS,
+    regulatory_checklist,
+)
+from .operations import STRUCTURED, value_label
 from .models import *
 from .forms import *
 from .services import *
@@ -156,7 +168,14 @@ def profile(request, pk=None):
                 else None
             )
             if existing:
-                return redirect("refine", pk=existing.pk)
+                return redirect(
+                    (
+                        "business_setup"
+                        if request.POST.get("next") == "business"
+                        else "refine"
+                    ),
+                    pk=existing.pk,
+                )
         valid = form.is_valid() & grouped.is_valid() & formset.is_valid()
         ctx = {
             **tabs_context(request, obj, "profile"),
@@ -182,11 +201,20 @@ def profile(request, pk=None):
             audit(request.user, "profile.updated" if pk else "request.created", obj.pk)
             messages.success(
                 request,
-                "Профиль сохранён. Предыдущие оценки требуют пересчёта."
-                if pk
-                else "Запрос создан. Добавьте варианты помещений.",
+                (
+                    "Профиль сохранён. Предыдущие оценки требуют пересчёта."
+                    if pk
+                    else "Запрос создан. Добавьте варианты помещений."
+                ),
             )
-            return redirect("refine", pk=obj.pk)
+            return redirect(
+                (
+                    "business_setup"
+                    if request.POST.get("next") == "business"
+                    else "refine"
+                ),
+                pk=obj.pk,
+            )
     return render(
         request,
         "profile.html",
@@ -196,6 +224,8 @@ def profile(request, pk=None):
             "formset": formset,
             "grouped": grouped,
             "new": not pk,
+            "regulatory": regulatory_checklist(obj),
+            "regulatory_references": REFERENCES,
         },
     )
 
@@ -238,8 +268,12 @@ def delete_request(request, pk):
     ):
         legacy_files = obj.legacy_attachments.all()
         if legacy_files.exists():
-            affected = Premises.objects.filter(pk__in=legacy_files.values("premises_id"))
-            list(affected.select_for_update().order_by("pk").values_list("pk", flat=True))
+            affected = Premises.objects.filter(
+                pk__in=legacy_files.values("premises_id")
+            )
+            list(
+                affected.select_for_update().order_by("pk").values_list("pk", flat=True)
+            )
             # These documents are private to the request even in the shared catalog.
             Observation.objects.filter(document__in=legacy_files).update(document=None)
             affected.update(version=F("version") + 1)
@@ -317,10 +351,14 @@ def delete_premises(request, object_id):
         .exclude(origin_request__owner=request.user)
         .exists()
     )
-    if deleting and not blocked and (
-        request_ids <= locked_ids
-        and check_version(request, p)
-        and request.POST.get("selection_version") == link_version
+    if (
+        deleting
+        and not blocked
+        and (
+            request_ids <= locked_ids
+            and check_version(request, p)
+            and request.POST.get("selection_version") == link_version
+        )
     ):
         p.request_links.all().delete()
         # Observations can protect the source documents stored on this premises.
@@ -343,9 +381,11 @@ def delete_premises(request, object_id):
                 f"Карточка исчезнет из каталога и связанных запросов ({len(links)}). "
                 "Характеристики, проверки и вложения удалятся. Выпущенные PDF сохранятся."
             ),
-            "blocked": "У помещения есть данные запросов коллег. Удалить его может руководитель."
-            if blocked
-            else "",
+            "blocked": (
+                "У помещения есть данные запросов коллег. Удалить его может руководитель."
+                if blocked
+                else ""
+            ),
             "version": p.version,
             "selection_version": link_version,
             "cancel_url": reverse("catalog_premises", args=[object_id]),
@@ -449,7 +489,13 @@ def property_page(
                     "latest": latest,
                     "conflict": len(
                         {
-                            (o.value, o.boolean, o.text, o.unit)
+                            (
+                                o.value,
+                                o.boolean,
+                                o.text,
+                                o.unit,
+                                json.dumps(o.structured_value, sort_keys=True),
+                            )
                             for o in live
                             if o.status != "unknown"
                         }
@@ -493,6 +539,10 @@ def property_page(
             context_form=context_form or ContextForm(instance=link),
             ev=current_evaluation(p, req),
             economics=economics(p, req),
+            regulatory=regulatory_checklist(req, link, with_notes=True),
+            regulatory_references=REFERENCES,
+            regulatory_status=REGULATORY_STATUS,
+            review_link=link,
         )
     else:
         ctx["economics"] = economics(p)
@@ -522,12 +572,12 @@ def premises_edit(request, pk=None, object_id=None):
             except (ValueError, TypeError, AttributeError):
                 key = None
             previous = (
-                    catalog_scope(request)
-                    .select_for_update()
-                    .filter(creation_key=key)
-                    .first()
-                    if key
-                    else None
+                catalog_scope(request)
+                .select_for_update()
+                .filter(creation_key=key)
+                .first()
+                if key
+                else None
             )
             if previous:
                 if req:
@@ -641,7 +691,12 @@ def resolve(request, object_id, observation_id, pk=None):
         or o.superseded
         or o.source_type in ["archive", "listing"]
         or o.scope != "premises"
-        or (o.value is None and o.boolean is None and not o.text)
+        or (
+            o.value is None
+            and o.boolean is None
+            and not o.text
+            and o.structured_value is None
+        )
     ):
         messages.error(
             request,
@@ -749,6 +804,60 @@ def request_context(request, pk, object_id):
             audit(request.user, "request.premises_context.updated", link.pk)
         return redirect("premises", pk=pk, object_id=object_id)
     return property_page(request, req, link.premises, context_form=form, status=400)
+
+
+@workspace
+@require_POST
+@transaction.atomic
+def regulatory_review(request, pk, object_id):
+    req, p = property_load(request, pk, object_id, write=True, lock=True)
+    link = get_object_or_404(
+        RequestPremises.objects.select_for_update(), request=req, premises=p
+    )
+    code = request.POST.get("rule")
+    rules = {rule["code"]: rule for rule in regulatory_checklist(req, link)}
+    rule = rules.get(code)
+    if not rule or not rule["reviewable"]:
+        raise Http404
+    status = request.POST.get("status")
+    note = request.POST.get("note", "").strip()
+    if (
+        not check_version(request, link)
+        or request.POST.get("profile_version") != str(req.version)
+        or request.POST.get("premises_version") != str(p.version)
+    ):
+        messages.error(
+            request, "Данные изменились. Проверьте текущие сведения перед отметкой."
+        )
+    elif (
+        status not in REGULATORY_STATUS
+        or len(note) > 700
+        or (status != "pending" and not note)
+    ):
+        messages.error(
+            request, "Укажите статус и основание проверки длиной до 700 символов."
+        )
+    else:
+        link.regulatory_reviews = {
+            **link.regulatory_reviews,
+            code: {
+                "status": status,
+                "note": note,
+                "registry": REGISTRY_VERSION,
+                "profile": req.version,
+                "premises": p.version,
+                "actor": request.user.pk,
+                "reviewed_on": timezone.localdate().isoformat(),
+            },
+        }
+        link.version += 1
+        link.save(update_fields=["regulatory_reviews", "version"])
+        audit(request.user, "request.regulatory.reviewed", f"{link.pk}:{code}")
+        messages.success(
+            request,
+            "Предварительная отметка сохранена. Пересчитайте оценку перед выпуском отчёта.",
+        )
+    return redirect(reverse("premises", args=[pk, object_id]) + "#normative-checklist")
 
 
 @workspace
@@ -910,6 +1019,9 @@ def compare(request, pk):
             "selected": selected,
             "rows": rows,
             "columns": columns,
+            "methods": METHODS,
+            "insufficient": INSUFFICIENT,
+            "regulatory_references": REFERENCES,
             "differences": differences,
             "preview": preview,
             "parameter_choices": [
@@ -1247,9 +1359,11 @@ def select_premises(request, pk):
     class AttachForm(forms.Form):
         objects = forms.ModelMultipleChoiceField(
             label="Выберите помещения",
-            queryset=catalog_scope(request).select_for_update().order_by("pk")
-            if request.method == "POST"
-            else catalog_scope(request),
+            queryset=(
+                catalog_scope(request).select_for_update().order_by("pk")
+                if request.method == "POST"
+                else catalog_scope(request)
+            ),
         )
 
         def clean_objects(self):
@@ -1340,6 +1454,7 @@ def apply_business_template(request, pk):
                 unit=char.unit,
                 operator="eq",
                 priority="desired",
+                origin="legacy-template",
             )
             changed = True
     if changed:
@@ -1351,6 +1466,139 @@ def apply_business_template(request, pk):
         "Добавлены только примерные желательные условия, которых ещё не было. Значения мощности и нормы не подставляются; ваши требования сохранены.",
     )
     return redirect("profile", pk=pk)
+
+
+def new_recommendations(req, format_code, answers):
+    requested = recommendations(format_code, answers)
+    existing = list(req.requirements.values_list("characteristic_id", "name"))
+    ids = {char_id for char_id, _ in existing}
+    names = {name for _, name in existing}
+    return [
+        (char, requested[char.code])
+        for char in Characteristic.objects.filter(code__in=requested).order_by("id")
+        if char.pk not in ids and char.label not in names
+    ]
+
+
+@workspace
+@transaction.atomic
+def financial_plan(request, pk):
+    write = request.method == "POST"
+    req = load_request(request, pk, write=write, lock=write)
+    form = FinancialPlanForm(request.POST or None, request_obj=req)
+    context = {**tabs_context(request, req, "profile"), "form": form}
+    if write and form.is_valid():
+        if not check_version(request, req):
+            return conflict(request, "financial_plan.html", context, form)
+        plan = form.plan()
+        if plan != req.financial_plan:
+            req.financial_plan = plan
+            req.version += 1
+            req.save(update_fields=["financial_plan", "version", "updated_at"])
+            audit(request.user, "profile.finance.updated", req.pk)
+        messages.success(request, "Финансовый сценарий сохранён.")
+        return redirect("compare", pk=pk)
+    return render(request, "financial_plan.html", context)
+
+
+@workspace
+@transaction.atomic
+def business_setup(request, pk):
+    write = request.method == "POST"
+    req = load_request(request, pk, write=write, lock=write)
+    salt = "leasefit.business-template-v1"
+    form = BusinessSetupForm(request.POST or None, request_obj=req)
+    context = {**tabs_context(request, req, "profile"), "form": form}
+    if write and request.POST.get("action") == "apply":
+        try:
+            payload = signing.loads(
+                request.POST.get("preview", ""), salt=salt, max_age=1800
+            )
+        except signing.BadSignature:
+            payload = {}
+        if (
+            payload.get("request") != req.pk
+            or payload.get("version") != req.version
+            or payload.get("format") not in FORMATS
+        ):
+            messages.error(
+                request,
+                "Профиль изменился или время предварительного просмотра истекло. Проверьте шаблон ещё раз.",
+            )
+            return redirect("business_setup", pk=pk)
+        format_code = payload["format"]
+        answers = payload["answers"]
+        if (
+            req.business_format != format_code
+            and req.requirements.exists()
+            and request.POST.get("confirm_category") != "yes"
+        ):
+            messages.error(
+                request,
+                "Подтвердите смену категории и сохранение существующих требований.",
+            )
+            return redirect("business_setup", pk=pk)
+        additions = new_recommendations(req, format_code, answers)
+        for char, value in additions:
+            Requirement.objects.create(
+                request=req,
+                characteristic=char,
+                name=char.label,
+                unit=char.unit,
+                operator="eq",
+                priority="desired",
+                structured_value=value if char.value_type in STRUCTURED else None,
+                origin=f"{format_code}@{TEMPLATE_VERSION}",
+            )
+        if (
+            additions
+            or req.business_format != format_code
+            or req.business_answers != answers
+        ):
+            req.business_format, req.business_answers = format_code, answers
+            req.version += 1
+            req.save(
+                update_fields=[
+                    "business_format",
+                    "business_answers",
+                    "version",
+                    "updated_at",
+                ]
+            )
+            audit(request.user, "profile.template.added", req.pk)
+        messages.success(
+            request, f"Формат сохранён. Добавлено рекомендаций: {len(additions)}."
+        )
+        return redirect("profile", pk=pk)
+    if write and form.is_valid():
+        format_code = form.cleaned_data["business_format"]
+        answers = form.answers()
+        context.update(
+            choices=[
+                (
+                    char.label,
+                    (
+                        value_label(char.value_type, char.code, value)
+                        if char.value_type in STRUCTURED
+                        else "Наличие"
+                    ),
+                )
+                for char, value in new_recommendations(req, format_code, answers)
+            ],
+            format_label=FORMATS[format_code].label,
+            confirm_category=req.business_format != format_code
+            and req.requirements.exists(),
+            preview=signing.dumps(
+                {
+                    "request": req.pk,
+                    "version": req.version,
+                    "format": format_code,
+                    "answers": answers,
+                },
+                salt=salt,
+            ),
+        )
+    return render(request, "business_setup.html", context)
 
 
 @login_required
@@ -1387,11 +1635,11 @@ def refine(request, pk):
                 dict(
                     name="Площадь",
                     unit="м²",
-                    operator="range"
-                    if lo is not None and hi is not None
-                    else "gte"
-                    if lo is not None
-                    else "lte",
+                    operator=(
+                        "range"
+                        if lo is not None and hi is not None
+                        else "gte" if lo is not None else "lte"
+                    ),
                     minimum=lo if lo is not None else hi,
                     maximum=hi if lo is not None else None,
                     priority=d["area_priority"],

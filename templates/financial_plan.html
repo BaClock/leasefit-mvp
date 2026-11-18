@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "request_header.html" %}
+  <section class="panel narrow">
+    <h2>Финансовый сценарий бизнеса</h2>
+    <p>Используйте месячные допущения клиента. Расходы помещения берутся из карточки варианта. Пустое поле означает отсутствие данных. Введите 0, если затрат действительно нет.</p>
+    <p>Целевой остаток и дополнительная нагрузка по умолчанию равны нулю. Снижение продаж применяется только к сценарию.</p>
+    <form method="post" class="dirty-form">
+      {% csrf_token %}
+      <fieldset {% if not can_edit %}disabled{% endif %}>
+        <div class="form-grid">{% include "fields.html" %}</div>
+        <button>Сохранить сценарий</button>
+      </fieldset>
+    </form>
+  </section>
+  <a href="{% url 'compare' req.pk %}">К проверке и сравнению</a>
+{% endblock %}

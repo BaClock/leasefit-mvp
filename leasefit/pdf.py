@@ -118,9 +118,11 @@ def render_pdf(s):
 
     def metrics(e):
         labels = [
-            "Полная месячная нагрузка"
-            if e["complete"]
-            else "Известный месячный подытог",
+            (
+                "Полная месячная нагрузка"
+                if e["complete"]
+                else "Известный месячный подытог"
+            ),
             "Разовые затраты" if e["once_complete"] else "Известный разовый подытог",
             "Допустимая базовая аренда",
         ]
@@ -184,9 +186,11 @@ def render_pdf(s):
                     para(money(e["monthly_total"]) + " / мес.", "metric"),
                     para(e["budget_label"], "small"),
                     para(
-                        "Полная нагрузка"
-                        if e["complete"]
-                        else "Подытог — есть неизвестные платежи",
+                        (
+                            "Полная нагрузка"
+                            if e["complete"]
+                            else "Подытог — есть неизвестные платежи"
+                        ),
                         "small",
                     ),
                 ],
@@ -264,8 +268,57 @@ def render_pdf(s):
             )
             p("Значение: " + row["value"])
             p(row["reason"])
+            if row.get("adjustment"):
+                p(row["adjustment"])
             if row["question"]:
                 p("Вопрос собственнику: " + row["question"])
+        if obj.get("regulatory"):
+            p("Предварительный нормативный чек-лист", "h2")
+            for rule in obj["regulatory"]:
+                p(
+                    f"{rule['title']} · {rule['label']} · {rule['document']['title']}, {rule['section']}."
+                )
+                if rule["status"] == "pending":
+                    p(rule["evidence"], "small")
+                p(rule["document"]["url"], "small")
+        if obj.get("financial"):
+            f = obj["financial"]
+            p("Сценарная экономика и качество данных", "h2")
+            if obj["fit_score"] is not None:
+                p(f"Баллы по профилю: {obj['fit_score']} / 100.")
+            evidence = obj["evidence_summary"]
+            p(
+                f"Критические параметры: подтверждено {evidence['confirmed']}, не подтверждено {evidence['unconfirmed']}, неизвестно {evidence['unknown']}."
+            )
+            if f["profit_rent"] is not None:
+                p(
+                    "Сценарный предел базовой аренды: "
+                    + money(f["profit_rent"])
+                    + "/мес."
+                )
+            if f["occupancy_share"] is not None:
+                p(f"Расходы помещения: {f['occupancy_share']} % сценарной выручки.")
+            if f["break_even"] is not None:
+                p(
+                    f"Безубыточность: {f['break_even']} операций в месяц."
+                    + (
+                        f" В рабочий день: {f['daily_break_even']}."
+                        if f["daily_break_even"] is not None
+                        else ""
+                    )
+                )
+            p(
+                (
+                    "Известный подытог открытия: "
+                    if f["opening_missing"]
+                    else "Необходимая сумма на открытие: "
+                )
+                + money(f["opening"])
+            )
+            if f["opening_missing"]:
+                p("Уточнить: " + ", ".join(f["opening_missing"]), "small")
+            for scenario in f["scenarios"]:
+                p(f"{scenario['label']} · {money(scenario['profit'])}/мес.")
         if "economics:monthly" in selected:
             p("Ежемесячные платежи", "h2")
             costs(e["monthly"])

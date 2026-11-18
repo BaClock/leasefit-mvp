@@ -71,6 +71,7 @@
       {% endif %}
     </section>
   {% endfor %}
+  {% include "regulatory.html" with rules=regulatory %}
   {% if can_edit %}
     <section class="panel" id="evidence-form">
       <h2>Записать фактическую характеристику</h2>

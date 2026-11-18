@@ -1,6 +1,18 @@
 # Результаты проверки P0
 
-Последнее обновление от 17 ноября 2026 — [общий каталог и группированные требования](SHARED_CATALOG.md).
+## Расширенный MVP · 19 ноября 2026
+
+- PostgreSQL 16 в отдельной Docker-базе: **72/72 теста**, без пропусков. `manage.py check` — без замечаний, `makemigrations --check --dry-run` — `No changes detected`. Синтаксис `--health-cmd=pg_isready` проверен фактическим запуском контейнера до `healthy`.
+- Миграционный тест применил `0005`–`0008` к исторической схеме `0004`. ID, версии, PDF и вложение тестовых записей сохранены. Повторное применение не создаёт дублей.
+- Chromium прошёл подтверждение значения и графика через полночь, предварительный просмотр и применение категории, нормативный чек-лист, финансовый сценарий, рейтинг, сравнение, отсоединение помещения и повторное скачивание оригинального PDF. На 1440, 768 и 390 px нет ошибок JavaScript и горизонтального переполнения.
+- Для полного учебного профиля в Новосибирске проверены разные результаты для одного ID помещения, доступ, разгрузка, графики через границу недели, применимость норм, источник рекомендаций, финансовые расчёты, отказ при пропусках, версионирование и изоляция агентств. [Сценарии и данные](MVP_TEST_SCENARIOS.md).
+- Локальный `check --deploy` с временным тестовым ключом дал W009 о длине тестового ключа и W021 об отключённом HSTS preload. В CI применяется отдельный тестовый ключ достаточной длины. Статус удалённого запуска отображается в GitHub Actions.
+
+Функциональные файлы: `config/urls.py`, `leasefit/business.py`, `business_forms.py`, `characteristics.py`, `forms.py`, `metric_forms.py`, `metrics.py`, `models.py`, `operation_forms.py`, `operations.py`, `pdf.py`, `regulations.py`, `services.py`, `views.py`. Шаблоны включают `business_setup.html`, `financial_plan.html`, `regulatory.html`, `analytics.html`, виджет расписания и обновлённые экраны профиля, помещения и сравнения. Тесты и данные: `leasefit/test_expanded_mvp.py`, `leasefit/test_catalog.py`, `leasefit/management/commands/seed_novosibirsk.py`, `scripts/browser_smoke.py`. CI: `.github/workflows/tests.yml`.
+
+## История проверок
+
+17 ноября 2026 — [общий каталог и группированные требования](SHARED_CATALOG.md).
 
 - Финальный Docker-образ собран и запущен; PostgreSQL и web — `healthy`. `check` — без замечаний, `makemigrations --check --dry-run` — `No changes detected`.
 - **59/59 тестов PostgreSQL**, 0 ошибок и пропусков, 11,281 с. На SQLite — 57 прошли и 2 теста PostgreSQL-блокировок ожидаемо пропущены, 6,578 с.

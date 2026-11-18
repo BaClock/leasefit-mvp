@@ -487,8 +487,21 @@ small,
   margin-bottom: 17px;
   min-width: 0;
 }
-#evidence-form .field[hidden] {
+.field[hidden] {
   display: none;
+}
+.weekly-day {
+  display: grid;
+  grid-template-columns: 2em repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.weekly-day input {
+  min-width: 0;
+}
+.entry-fields .weekly-schedule {
+  min-width: 0;
 }
 .field label,
 label {
