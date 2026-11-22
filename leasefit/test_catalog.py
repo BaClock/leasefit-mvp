@@ -3,6 +3,7 @@ import json
 import uuid
 from decimal import Decimal
 from io import BytesIO
+from django.conf import settings
 from django.test import Client, TestCase, TransactionTestCase
 from django.contrib.auth.models import User
 from django.db import connection
@@ -171,7 +172,7 @@ class SharedCatalogTests(TestCase):
             key: confirmation.context[key] for key in ("version", "selection_version")
         }
         self.assertEqual(client.post(url, data).status_code, 403)
-        data["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
+        data["csrfmiddlewaretoken"] = client.cookies[settings.CSRF_COOKIE_NAME].value
         RequestPremises.objects.create(request=self.coffee, premises=p)
         self.assertEqual(client.post(url, data).status_code, 409)
         self.assertTrue(Premises.objects.filter(pk=p.pk).exists())

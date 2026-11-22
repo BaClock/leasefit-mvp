@@ -1,0 +1,2550 @@
+{
+  "metadata": {
+    "dataset_id": "leasefit-novosibirsk-showcase-2026-v1",
+    "dataset_version": 1,
+    "purpose": "Исключительно учебная демонстрация автоматического подбора LeaseFIT",
+    "city": "Новосибирск",
+    "country": "Россия",
+    "agency_name": "DEMO LeaseFIT · Новосибирск · учебные данные",
+    "fictional": true,
+    "real_ads": false,
+    "real_documents": false,
+    "real_contacts": false,
+    "property_external_ids_prefix": "NSK-P",
+    "request_external_ids_prefix": "NSK-B",
+    "data_warning": "Все адресные метки, суммы, мощности и подтверждения полностью вымышленные. Не использовать как реальные предложения и юридические/санитарные заключения.",
+    "confirmation_policy": "Разрешено моделировать confirmed только в отдельной изолированной демо-БД с маркировкой СИНТЕТИЧЕСКОЕ; никогда не подменять ими реальные документы.",
+    "created_for": "Пример данных для будущей команды Codex; импорт в проект еще не выполнен."
+  },
+  "premises": [
+    {
+      "external_id": "NSK-P01",
+      "label": "ДЕМО NSK-P01 · Торговое с витринными окнами · Центральный район",
+      "city": "Новосибирск",
+      "district": "Центральный",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P01",
+      "area_sqm": 44,
+      "commercial": {
+        "rent_rub_month": 110000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 110000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 44,
+        "power_kw": 18,
+        "ceiling_height_m": 3.1,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": false,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "display_windows": true,
+        "accessible_entrance": true,
+        "unloading_methods": [
+          "street"
+        ],
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              420,
+              1380
+            ],
+            [
+              1,
+              420,
+              1380
+            ],
+            [
+              2,
+              420,
+              1380
+            ],
+            [
+              3,
+              420,
+              1380
+            ],
+            [
+              4,
+              420,
+              1380
+            ],
+            [
+              5,
+              420,
+              1380
+            ],
+            [
+              6,
+              420,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P02",
+      "label": "ДЕМО NSK-P02 · Помещение для небольшой кофейни · Железнодорожный район",
+      "city": "Новосибирск",
+      "district": "Железнодорожный",
+      "location_confirmed": true,
+      "premises_type": "food",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P02",
+      "area_sqm": 78,
+      "commercial": {
+        "rent_rub_month": 155000,
+        "operating_rub_month": 15000,
+        "utilities_rub_month": 8000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 155000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 78,
+        "power_kw": 35,
+        "ceiling_height_m": 3.3,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "yard",
+          "service"
+        ],
+        "wet_points": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              360,
+              1380
+            ],
+            [
+              1,
+              360,
+              1380
+            ],
+            [
+              2,
+              360,
+              1380
+            ],
+            [
+              3,
+              360,
+              1380
+            ],
+            [
+              4,
+              360,
+              1380
+            ],
+            [
+              5,
+              360,
+              1380
+            ],
+            [
+              6,
+              360,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P03",
+      "label": "ДЕМО NSK-P03 · Компактный торговый блок · Ленинский район",
+      "city": "Новосибирск",
+      "district": "Ленинский",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P03",
+      "area_sqm": 30,
+      "commercial": {
+        "rent_rub_month": 45000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 45000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 30,
+        "power_kw": 12,
+        "ceiling_height_m": 2.7,
+        "water_supply": true,
+        "sewerage": false,
+        "ventilation": null,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "street"
+        ],
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1260
+            ],
+            [
+              1,
+              540,
+              1260
+            ],
+            [
+              2,
+              540,
+              1260
+            ],
+            [
+              3,
+              540,
+              1260
+            ],
+            [
+              4,
+              540,
+              1260
+            ],
+            [
+              5,
+              540,
+              1260
+            ],
+            [
+              6,
+              540,
+              1260
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [
+        "ventilation"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P04",
+      "label": "ДЕМО NSK-P04 · Склад со специальной зоной разгрузки · Кировский район",
+      "city": "Новосибирск",
+      "district": "Кировский",
+      "location_confirmed": true,
+      "premises_type": "warehouse",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P04",
+      "area_sqm": 170,
+      "commercial": {
+        "rent_rub_month": 100000,
+        "operating_rub_month": 13000,
+        "utilities_rub_month": 9000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 100000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 170,
+        "power_kw": 20,
+        "ceiling_height_m": 4.2,
+        "water_supply": false,
+        "sewerage": false,
+        "ventilation": true,
+        "separate_entrance": true,
+        "visitor_entry": "controlled",
+        "unloading_methods": [
+          "dock",
+          "service"
+        ],
+        "delivery_vehicles": [
+          "truck",
+          "van"
+        ],
+        "truck_access": true,
+        "storage_zone": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1200
+            ],
+            [
+              1,
+              480,
+              1200
+            ],
+            [
+              2,
+              480,
+              1200
+            ],
+            [
+              3,
+              480,
+              1200
+            ],
+            [
+              4,
+              480,
+              1200
+            ],
+            [
+              5,
+              480,
+              1200
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P05",
+      "label": "ДЕМО NSK-P05 · Помещение кафе с неподтверждённой вытяжкой · Октябрьский район",
+      "city": "Новосибирск",
+      "district": "Октябрьский",
+      "location_confirmed": true,
+      "premises_type": "food",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P05",
+      "area_sqm": 92,
+      "commercial": {
+        "rent_rub_month": 140000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 140000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 92,
+        "power_kw": 32,
+        "ceiling_height_m": 3.4,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": null,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "yard"
+        ],
+        "storage_zone": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1380
+            ],
+            [
+              1,
+              540,
+              1380
+            ],
+            [
+              2,
+              540,
+              1380
+            ],
+            [
+              3,
+              540,
+              1380
+            ],
+            [
+              4,
+              540,
+              1380
+            ],
+            [
+              5,
+              540,
+              1380
+            ],
+            [
+              6,
+              540,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [
+        "ventilation"
+      ],
+      "unknown_specs": [
+        "separate_exhaust"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P06",
+      "label": "ДЕМО NSK-P06 · Торговый блок с доступным входом · Заельцовский район",
+      "city": "Новосибирск",
+      "district": "Заельцовский",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P06",
+      "area_sqm": 64,
+      "commercial": {
+        "rent_rub_month": 115000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 115000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 64,
+        "power_kw": 20,
+        "ceiling_height_m": 3.0,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "display_windows": true,
+        "accessible_entrance": true,
+        "unloading_methods": [
+          "street"
+        ],
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1320
+            ],
+            [
+              1,
+              480,
+              1320
+            ],
+            [
+              2,
+              480,
+              1320
+            ],
+            [
+              3,
+              480,
+              1320
+            ],
+            [
+              4,
+              480,
+              1320
+            ],
+            [
+              5,
+              480,
+              1320
+            ],
+            [
+              6,
+              480,
+              1320
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P07",
+      "label": "ДЕМО NSK-P07 · Офис с доступом по пропускам · Советский район",
+      "city": "Новосибирск",
+      "district": "Советский",
+      "location_confirmed": true,
+      "premises_type": "office",
+      "floor": "2",
+      "number": "УЧЕБНЫЙ-P07",
+      "area_sqm": 54,
+      "commercial": {
+        "rent_rub_month": 55000,
+        "operating_rub_month": 5000,
+        "utilities_rub_month": 5000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 55000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 54,
+        "power_kw": 10,
+        "ceiling_height_m": 2.8,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_entrance": false,
+        "visitor_entry": "controlled",
+        "accessible_entrance": false,
+        "heating": true,
+        "air_conditioning": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1200
+            ],
+            [
+              1,
+              480,
+              1200
+            ],
+            [
+              2,
+              480,
+              1200
+            ],
+            [
+              3,
+              480,
+              1200
+            ],
+            [
+              4,
+              480,
+              1200
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P08",
+      "label": "ДЕМО NSK-P08 · Просторный торговый блок для продуктов · Калининский район",
+      "city": "Новосибирск",
+      "district": "Калининский",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P08",
+      "area_sqm": 113,
+      "commercial": {
+        "rent_rub_month": 126000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 126000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 113,
+        "power_kw": 40,
+        "ceiling_height_m": 3.5,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": false,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "yard",
+          "street"
+        ],
+        "storage_zone": true,
+        "parking": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1380
+            ],
+            [
+              1,
+              480,
+              1380
+            ],
+            [
+              2,
+              480,
+              1380
+            ],
+            [
+              3,
+              480,
+              1380
+            ],
+            [
+              4,
+              480,
+              1380
+            ],
+            [
+              5,
+              480,
+              1380
+            ],
+            [
+              6,
+              480,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P09",
+      "label": "ДЕМО NSK-P09 · Помещение с мокрыми точками · Дзержинский район",
+      "city": "Новосибирск",
+      "district": "Дзержинский",
+      "location_confirmed": true,
+      "premises_type": "service",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P09",
+      "area_sqm": 58,
+      "commercial": {
+        "rent_rub_month": 95000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 95000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 58,
+        "power_kw": 24,
+        "ceiling_height_m": 3.0,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "wet_points": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "accessible_entrance": true,
+        "air_conditioning": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1260
+            ],
+            [
+              1,
+              540,
+              1260
+            ],
+            [
+              2,
+              540,
+              1260
+            ],
+            [
+              3,
+              540,
+              1260
+            ],
+            [
+              4,
+              540,
+              1260
+            ],
+            [
+              5,
+              540,
+              1260
+            ],
+            [
+              6,
+              540,
+              1260
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P10",
+      "label": "ДЕМО NSK-P10 · Небольшой блок с неполной инженерией · Первомайский район",
+      "city": "Новосибирск",
+      "district": "Первомайский",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P10",
+      "area_sqm": 38,
+      "commercial": {
+        "rent_rub_month": 38000,
+        "operating_rub_month": null,
+        "utilities_rub_month": 4500,
+        "other_monthly_rub": null,
+        "vat_mode": "unknown",
+        "deposit_rub": 38000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 38,
+        "power_kw": 8,
+        "ceiling_height_m": 2.6,
+        "water_supply": null,
+        "sewerage": null,
+        "ventilation": null,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": null,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1200
+            ],
+            [
+              1,
+              540,
+              1200
+            ],
+            [
+              2,
+              540,
+              1200
+            ],
+            [
+              3,
+              540,
+              1200
+            ],
+            [
+              4,
+              540,
+              1200
+            ],
+            [
+              5,
+              540,
+              1200
+            ],
+            [
+              6,
+              540,
+              1200
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [
+        "water_supply",
+        "sewerage",
+        "ventilation",
+        "unloading_methods"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P11",
+      "label": "ДЕМО NSK-P11 · Большой шоурум · Центральный район",
+      "city": "Новосибирск",
+      "district": "Центральный",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P11",
+      "area_sqm": 135,
+      "commercial": {
+        "rent_rub_month": 255000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 255000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 135,
+        "power_kw": 28,
+        "ceiling_height_m": 3.7,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "display_windows": true,
+        "accessible_entrance": true,
+        "parking": false,
+        "unloading_methods": [
+          "street"
+        ],
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              600,
+              1320
+            ],
+            [
+              1,
+              600,
+              1320
+            ],
+            [
+              2,
+              600,
+              1320
+            ],
+            [
+              3,
+              600,
+              1320
+            ],
+            [
+              4,
+              600,
+              1320
+            ],
+            [
+              5,
+              600,
+              1320
+            ],
+            [
+              6,
+              600,
+              1320
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P12",
+      "label": "ДЕМО NSK-P12 · Офисный блок с кабинетами · Железнодорожный район",
+      "city": "Новосибирск",
+      "district": "Железнодорожный",
+      "location_confirmed": true,
+      "premises_type": "office",
+      "floor": "3",
+      "number": "УЧЕБНЫЙ-P12",
+      "area_sqm": 89,
+      "commercial": {
+        "rent_rub_month": 125000,
+        "operating_rub_month": 5000,
+        "utilities_rub_month": 5000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 125000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 89,
+        "power_kw": 12,
+        "ceiling_height_m": 2.9,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_entrance": false,
+        "visitor_entry": "controlled",
+        "heating": true,
+        "air_conditioning": true,
+        "room_count": 5,
+        "accessible_entrance": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1260
+            ],
+            [
+              1,
+              480,
+              1260
+            ],
+            [
+              2,
+              480,
+              1260
+            ],
+            [
+              3,
+              480,
+              1260
+            ],
+            [
+              4,
+              480,
+              1260
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P13",
+      "label": "ДЕМО NSK-P13 · Пункт выдачи с зоной хранения · Ленинский район",
+      "city": "Новосибирск",
+      "district": "Ленинский",
+      "location_confirmed": true,
+      "premises_type": "retail",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P13",
+      "area_sqm": 69,
+      "commercial": {
+        "rent_rub_month": 67000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 67000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 69,
+        "power_kw": 15,
+        "ceiling_height_m": 3.1,
+        "water_supply": false,
+        "sewerage": false,
+        "ventilation": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "storage_zone": true,
+        "unloading_methods": [
+          "service",
+          "street"
+        ],
+        "delivery_vehicles": [
+          "van"
+        ],
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1380
+            ],
+            [
+              1,
+              480,
+              1380
+            ],
+            [
+              2,
+              480,
+              1380
+            ],
+            [
+              3,
+              480,
+              1380
+            ],
+            [
+              4,
+              480,
+              1380
+            ],
+            [
+              5,
+              480,
+              1380
+            ],
+            [
+              6,
+              480,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P14",
+      "label": "ДЕМО NSK-P14 · Мастерская с трёхфазным электроснабжением · Кировский район",
+      "city": "Новосибирск",
+      "district": "Кировский",
+      "location_confirmed": true,
+      "premises_type": "service",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P14",
+      "area_sqm": 110,
+      "commercial": {
+        "rent_rub_month": 85000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 85000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 110,
+        "power_kw": 50,
+        "ceiling_height_m": 4.0,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "three_phase": true,
+        "separate_entrance": true,
+        "visitor_entry": "controlled",
+        "unloading_methods": [
+          "service"
+        ],
+        "delivery_vehicles": [
+          "van",
+          "truck"
+        ],
+        "truck_access": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1320
+            ],
+            [
+              1,
+              480,
+              1320
+            ],
+            [
+              2,
+              480,
+              1320
+            ],
+            [
+              3,
+              480,
+              1320
+            ],
+            [
+              4,
+              480,
+              1320
+            ],
+            [
+              5,
+              480,
+              1320
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P15",
+      "label": "ДЕМО NSK-P15 · Цокольное помещение с ограниченной вентиляцией · Октябрьский район",
+      "city": "Новосибирск",
+      "district": "Октябрьский",
+      "location_confirmed": true,
+      "premises_type": "other",
+      "floor": "-1",
+      "number": "УЧЕБНЫЙ-P15",
+      "area_sqm": 70,
+      "commercial": {
+        "rent_rub_month": 50000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 50000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 70,
+        "power_kw": 14,
+        "ceiling_height_m": 2.45,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": false,
+        "separate_entrance": false,
+        "visitor_entry": "controlled",
+        "display_windows": false,
+        "accessible_entrance": false,
+        "unloading_methods": null,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1200
+            ],
+            [
+              1,
+              540,
+              1200
+            ],
+            [
+              2,
+              540,
+              1200
+            ],
+            [
+              3,
+              540,
+              1200
+            ],
+            [
+              4,
+              540,
+              1200
+            ],
+            [
+              5,
+              540,
+              1200
+            ],
+            [
+              6,
+              540,
+              1200
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [
+        "unloading_methods"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P16",
+      "label": "ДЕМО NSK-P16 · Помещение с оборудованной кухонной зоной · Заельцовский район",
+      "city": "Новосибирск",
+      "district": "Заельцовский",
+      "location_confirmed": true,
+      "premises_type": "food",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P16",
+      "area_sqm": 125,
+      "commercial": {
+        "rent_rub_month": 198000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 198000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 125,
+        "power_kw": 60,
+        "ceiling_height_m": 3.6,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": true,
+        "three_phase": true,
+        "storage_zone": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "yard",
+          "service"
+        ],
+        "wet_points": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              360,
+              1380
+            ],
+            [
+              1,
+              360,
+              1380
+            ],
+            [
+              2,
+              360,
+              1380
+            ],
+            [
+              3,
+              360,
+              1380
+            ],
+            [
+              4,
+              360,
+              1380
+            ],
+            [
+              5,
+              360,
+              1380
+            ],
+            [
+              6,
+              360,
+              1380
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P17",
+      "label": "ДЕМО NSK-P17 · Небольшой офис без свободного входа · Советский район",
+      "city": "Новосибирск",
+      "district": "Советский",
+      "location_confirmed": true,
+      "premises_type": "office",
+      "floor": "2",
+      "number": "УЧЕБНЫЙ-P17",
+      "area_sqm": 42,
+      "commercial": {
+        "rent_rub_month": 41000,
+        "operating_rub_month": 5000,
+        "utilities_rub_month": 5000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 41000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 42,
+        "power_kw": 8,
+        "ceiling_height_m": 2.7,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": null,
+        "separate_entrance": false,
+        "visitor_entry": "staff",
+        "heating": true,
+        "air_conditioning": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1140
+            ],
+            [
+              1,
+              540,
+              1140
+            ],
+            [
+              2,
+              540,
+              1140
+            ],
+            [
+              3,
+              540,
+              1140
+            ],
+            [
+              4,
+              540,
+              1140
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [
+        "ventilation"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P18",
+      "label": "ДЕМО NSK-P18 · ПВЗ крупногабаритных товаров · Калининский район",
+      "city": "Новосибирск",
+      "district": "Калининский",
+      "location_confirmed": true,
+      "premises_type": "warehouse",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P18",
+      "area_sqm": 145,
+      "commercial": {
+        "rent_rub_month": 115000,
+        "operating_rub_month": 13000,
+        "utilities_rub_month": 9000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 115000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 145,
+        "power_kw": 26,
+        "ceiling_height_m": 4.0,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "storage_zone": true,
+        "unloading_methods": [
+          "dock"
+        ],
+        "delivery_vehicles": [
+          "truck",
+          "van"
+        ],
+        "truck_access": true,
+        "parking": true,
+        "heating": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              480,
+              1320
+            ],
+            [
+              1,
+              480,
+              1320
+            ],
+            [
+              2,
+              480,
+              1320
+            ],
+            [
+              3,
+              480,
+              1320
+            ],
+            [
+              4,
+              480,
+              1320
+            ],
+            [
+              5,
+              480,
+              1320
+            ],
+            [
+              6,
+              480,
+              1320
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P19",
+      "label": "ДЕМО NSK-P19 · Универсальное помещение с неизвестной мощностью · Дзержинский район",
+      "city": "Новосибирск",
+      "district": "Дзержинский",
+      "location_confirmed": true,
+      "premises_type": "other",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P19",
+      "area_sqm": 46,
+      "commercial": {
+        "rent_rub_month": 80000,
+        "operating_rub_month": 8000,
+        "utilities_rub_month": null,
+        "other_monthly_rub": 0,
+        "vat_mode": "unknown",
+        "deposit_rub": 80000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 46,
+        "power_kw": null,
+        "ceiling_height_m": null,
+        "water_supply": true,
+        "sewerage": null,
+        "ventilation": null,
+        "separate_exhaust": null,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": null,
+        "operating_schedule": null
+      },
+      "unverified_specs": [
+        "water_supply"
+      ],
+      "unknown_specs": [
+        "power_kw",
+        "ceiling_height_m",
+        "sewerage",
+        "ventilation",
+        "separate_exhaust",
+        "unloading_methods",
+        "operating_schedule"
+      ],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    },
+    {
+      "external_id": "NSK-P20",
+      "label": "ДЕМО NSK-P20 · Помещение для небольшой кухни без вытяжки · Первомайский район",
+      "city": "Новосибирск",
+      "district": "Первомайский",
+      "location_confirmed": true,
+      "premises_type": "food",
+      "floor": "1",
+      "number": "УЧЕБНЫЙ-P20",
+      "area_sqm": 85,
+      "commercial": {
+        "rent_rub_month": 78000,
+        "operating_rub_month": 7000,
+        "utilities_rub_month": 6000,
+        "other_monthly_rub": 0,
+        "vat_mode": "included",
+        "deposit_rub": 78000,
+        "commission_rub": 0,
+        "source_type": "manual",
+        "status": "unverified",
+        "source": "Синтетический набор LeaseFIT. НЕ реальное объявление и НЕ коммерческое предложение."
+      },
+      "specs": {
+        "area_sqm": 85,
+        "power_kw": 27,
+        "ceiling_height_m": 3.2,
+        "water_supply": true,
+        "sewerage": true,
+        "ventilation": true,
+        "separate_exhaust": false,
+        "separate_entrance": true,
+        "visitor_entry": "open",
+        "unloading_methods": [
+          "yard"
+        ],
+        "storage_zone": true,
+        "operating_schedule": {
+          "mode": "weekly",
+          "intervals": [
+            [
+              0,
+              540,
+              1320
+            ],
+            [
+              1,
+              540,
+              1320
+            ],
+            [
+              2,
+              540,
+              1320
+            ],
+            [
+              3,
+              540,
+              1320
+            ],
+            [
+              4,
+              540,
+              1320
+            ],
+            [
+              5,
+              540,
+              1320
+            ],
+            [
+              6,
+              540,
+              1320
+            ]
+          ]
+        }
+      },
+      "unverified_specs": [],
+      "unknown_specs": [],
+      "source_note": "Все значения вымышленные. Для статуса confirmed в отдельной демо-БД используются только явно помеченные синтетические подтверждения."
+    }
+  ],
+  "business_profiles": [
+    {
+      "external_id": "NSK-B01",
+      "title": "ДЕМО Кофейня навынос · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "food.coffee_to_go",
+      "business": "Кофейня навынос",
+      "monthly_budget_rub": 115000,
+      "start_budget_rub": 420000,
+      "financial_plan": {
+        "revenue_rub_month": 360000,
+        "average_rub": 320,
+        "variable_rub_per_operation": 125,
+        "fixed_rub_month": 92000,
+        "working_days": 26,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "preparation": "yes",
+        "hot_kitchen": "no",
+        "seating": "no",
+        "food_storage": "yes"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 25,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 15,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "sewerage",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "display_windows",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B02",
+      "title": "ДЕМО Кофейня с посадкой · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "food.coffee_seating",
+      "business": "Кофейня с посадкой",
+      "monthly_budget_rub": 170000,
+      "start_budget_rub": 760000,
+      "financial_plan": {
+        "revenue_rub_month": 680000,
+        "average_rub": 460,
+        "variable_rub_per_operation": 190,
+        "fixed_rub_month": 150000,
+        "working_days": 27,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "preparation": "yes",
+        "seating": "yes",
+        "food_storage": "yes"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 55,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 22,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "sewerage",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "ventilation",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "accessible_entrance",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B03",
+      "title": "ДЕМО Кафе с полноценной кухней · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "food.cafe_kitchen",
+      "business": "Кафе с полноценной кухней",
+      "monthly_budget_rub": 235000,
+      "start_budget_rub": 1700000,
+      "financial_plan": {
+        "revenue_rub_month": 1200000,
+        "average_rub": 850,
+        "variable_rub_per_operation": 360,
+        "fixed_rub_month": 300000,
+        "working_days": 29,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "preparation": "yes",
+        "hot_kitchen": "yes",
+        "food_storage": "yes",
+        "food_delivery": "yes",
+        "extraction": "yes"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 90,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 45,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "sewerage",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "ventilation",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "separate_exhaust",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "unloading_methods",
+          "operator": "eq",
+          "value": [
+            "service"
+          ],
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B04",
+      "title": "ДЕМО Пекарня · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "food.bakery",
+      "business": "Пекарня",
+      "monthly_budget_rub": 215000,
+      "start_budget_rub": 1350000,
+      "financial_plan": {
+        "revenue_rub_month": 880000,
+        "average_rub": 390,
+        "variable_rub_per_operation": 175,
+        "fixed_rub_month": 215000,
+        "working_days": 27,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "preparation": "yes",
+        "baking": "yes",
+        "food_storage": "yes"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 80,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 40,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "sewerage",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "ventilation",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "separate_exhaust",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "three_phase",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B05",
+      "title": "ДЕМО ПВЗ стандартный · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "pickup.standard",
+      "business": "ПВЗ стандартный",
+      "monthly_budget_rub": 85000,
+      "start_budget_rub": 300000,
+      "financial_plan": {
+        "revenue_rub_month": 190000,
+        "average_rub": 65,
+        "variable_rub_per_operation": 12,
+        "fixed_rub_month": 55000,
+        "working_days": 30,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "customers": "yes",
+        "storage": "yes",
+        "oversize": "no"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 35,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 8,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "storage_zone",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "unloading_methods",
+          "operator": "eq",
+          "value": [
+            "street"
+          ],
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B06",
+      "title": "ДЕМО ПВЗ крупногабаритных товаров · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "pickup.oversize",
+      "business": "ПВЗ крупногабаритных товаров",
+      "monthly_budget_rub": 165000,
+      "start_budget_rub": 580000,
+      "financial_plan": {
+        "revenue_rub_month": 380000,
+        "average_rub": 120,
+        "variable_rub_per_operation": 30,
+        "fixed_rub_month": 90000,
+        "working_days": 30,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {
+        "customers": "yes",
+        "storage": "yes",
+        "oversize": "yes",
+        "unloading": "yes"
+      },
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 95,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 14,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "storage_zone",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "unloading_methods",
+          "operator": "eq",
+          "value": [
+            "dock"
+          ],
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "delivery_vehicles",
+          "operator": "eq",
+          "value": [
+            "truck"
+          ],
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B07",
+      "title": "ДЕМО Продуктовый магазин · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "retail.grocery",
+      "business": "Продуктовый магазин",
+      "monthly_budget_rub": 175000,
+      "start_budget_rub": 1150000,
+      "financial_plan": {
+        "revenue_rub_month": 950000,
+        "average_rub": 600,
+        "variable_rub_per_operation": 440,
+        "fixed_rub_month": 160000,
+        "working_days": 30,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 70,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 25,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "ventilation",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "unloading_methods",
+          "operator": "eq",
+          "value": [
+            "yard"
+          ],
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B08",
+      "title": "ДЕМО Магазин непродовольственных товаров · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "retail.nonfood",
+      "business": "Магазин непродовольственных товаров",
+      "monthly_budget_rub": 135000,
+      "start_budget_rub": 650000,
+      "financial_plan": {
+        "revenue_rub_month": 570000,
+        "average_rub": 1500,
+        "variable_rub_per_operation": 940,
+        "fixed_rub_month": 94000,
+        "working_days": 27,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 40,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 10,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "display_windows",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "accessible_entrance",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B09",
+      "title": "ДЕМО Салон красоты · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "services.beauty",
+      "business": "Салон красоты",
+      "monthly_budget_rub": 135000,
+      "start_budget_rub": 780000,
+      "financial_plan": {
+        "revenue_rub_month": 590000,
+        "average_rub": 1700,
+        "variable_rub_per_operation": 450,
+        "fixed_rub_month": 180000,
+        "working_days": 26,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 40,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 18,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "water_supply",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "sewerage",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "wet_points",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B10",
+      "title": "ДЕМО Клиентский офис · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "office.clients",
+      "business": "Клиентский офис",
+      "monthly_budget_rub": 95000,
+      "start_budget_rub": 270000,
+      "financial_plan": {
+        "revenue_rub_month": 520000,
+        "average_rub": 4500,
+        "variable_rub_per_operation": 500,
+        "fixed_rub_month": 225000,
+        "working_days": 22,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 35,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 7,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "heating",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "visitor_entry",
+          "operator": "eq",
+          "value": "open",
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "accessible_entrance",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B11",
+      "title": "ДЕМО Офис без приёма клиентов · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "office.internal",
+      "business": "Офис без приёма клиентов",
+      "monthly_budget_rub": 70000,
+      "start_budget_rub": 200000,
+      "financial_plan": {
+        "revenue_rub_month": 260000,
+        "average_rub": 2000,
+        "variable_rub_per_operation": 100,
+        "fixed_rub_month": 112000,
+        "working_days": 22,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 25,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 5,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "heating",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "air_conditioning",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    },
+    {
+      "external_id": "NSK-B12",
+      "title": "ДЕМО Ремонтная мастерская · Новосибирск",
+      "city": "Новосибирск",
+      "business_format": "services.repair",
+      "business": "Ремонтная мастерская",
+      "monthly_budget_rub": 110000,
+      "start_budget_rub": 520000,
+      "financial_plan": {
+        "revenue_rub_month": 540000,
+        "average_rub": 1900,
+        "variable_rub_per_operation": 610,
+        "fixed_rub_month": 146000,
+        "working_days": 26,
+        "target_profit_rub_month": 20000,
+        "custom_drop_pct": 25
+      },
+      "business_answers": {},
+      "requirements": [
+        {
+          "code": "area_sqm",
+          "operator": "gte",
+          "value": 50,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "power_kw",
+          "operator": "gte",
+          "value": 20,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "ventilation",
+          "operator": "eq",
+          "value": true,
+          "priority": "required",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "three_phase",
+          "operator": "eq",
+          "value": true,
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        },
+        {
+          "code": "unloading_methods",
+          "operator": "eq",
+          "value": [
+            "service"
+          ],
+          "priority": "desired",
+          "origin": "demo-client",
+          "is_normative": false
+        }
+      ],
+      "no_initial_premises_links": true
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "profile": "NSK-B01",
+      "premises": "NSK-P01",
+      "expect_technical": "pass",
+      "reason": "18 кВт, вода, канализация, свободный вход, площадь 44 м²"
+    },
+    {
+      "profile": "NSK-B01",
+      "premises": "NSK-P03",
+      "expect_technical": "blocker",
+      "reason": "Канализация явно отсутствует, хотя обязательна"
+    },
+    {
+      "profile": "NSK-B01",
+      "premises": "NSK-P10",
+      "expect_technical": "blocker",
+      "reason": "Подтверждённые 8 кВт ниже заданного порога 15 кВт. Неизвестные вода и канализация не отменяют блокер"
+    },
+    {
+      "profile": "NSK-B03",
+      "premises": "NSK-P16",
+      "expect_technical": "pass",
+      "reason": "125 м², 60 кВт, отдельная вытяжка, вентиляция и вход"
+    },
+    {
+      "profile": "NSK-B03",
+      "premises": "NSK-P02",
+      "expect_technical": "blocker",
+      "reason": "35 кВт меньше заданного порога 45 кВт"
+    },
+    {
+      "profile": "NSK-B03",
+      "premises": "NSK-P19",
+      "expect_technical": "blocker",
+      "reason": "46 м² меньше обязательных 90 м², даже при неизвестной мощности"
+    },
+    {
+      "profile": "NSK-B06",
+      "premises": "NSK-P18",
+      "expect_technical": "pass",
+      "reason": "Разгрузка через док, грузовой транспорт, свободный доступ и 145 м²"
+    },
+    {
+      "profile": "NSK-B06",
+      "premises": "NSK-P04",
+      "expect_technical": "blocker",
+      "reason": "Доступ по пропускам, а нужен свободный вход"
+    },
+    {
+      "profile": "NSK-B09",
+      "premises": "NSK-P09",
+      "expect_technical": "pass",
+      "reason": "58 м², 24 кВт, вода, канализация и свободный вход"
+    },
+    {
+      "profile": "NSK-B11",
+      "premises": "NSK-P17",
+      "expect_technical": "pass",
+      "reason": "42 м², 8 кВт и отопление; посетители не требуются"
+    },
+    {
+      "profile": "NSK-B01",
+      "premises": "NSK-P19",
+      "expect_technical": "clarify",
+      "reason": "Площадь 46 м² и вход подтверждены, мощность и канализация неизвестны, вода не подтверждена"
+    },
+    {
+      "profile": "NSK-B02",
+      "premises": "NSK-P05",
+      "expect_technical": "clarify",
+      "reason": "Вентиляция заявлена, но не подтверждена; остальные обязательные условия выполнены"
+    },
+    {
+      "profile": "NSK-B05",
+      "premises": "NSK-P19",
+      "expect_technical": "clarify",
+      "reason": "Электрическая мощность неизвестна, обязательные требования не полностью подтверждены"
+    }
+  ]
+}

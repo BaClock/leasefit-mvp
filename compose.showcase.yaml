@@ -1,0 +1,40 @@
+name: leasefit-showcase
+services:
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: leasefit_showcase
+      POSTGRES_USER: leasefit_demo
+      POSTGRES_PASSWORD: ${LEASEFIT_DEMO_DB_PASSWORD:?Set LEASEFIT_DEMO_DB_PASSWORD in .env.showcase}
+    volumes:
+      - showcase_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "leasefit_demo", "-d", "leasefit_showcase"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+  web:
+    build: .
+    environment:
+      DEBUG: "1"
+      LEASEFIT_SHOWCASE: "1"
+      SECRET_KEY: ${LEASEFIT_DEMO_SECRET_KEY:?Set LEASEFIT_DEMO_SECRET_KEY in .env.showcase}
+      POSTGRES_DB: leasefit_showcase
+      POSTGRES_USER: leasefit_demo
+      POSTGRES_PASSWORD: ${LEASEFIT_DEMO_DB_PASSWORD}
+      SESSION_COOKIE_NAME: leasefit_showcase_session
+      CSRF_COOKIE_NAME: leasefit_showcase_csrf
+    ports:
+      - "127.0.0.1:${LEASEFIT_DEMO_PORT:-8001}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  showcase_postgres:

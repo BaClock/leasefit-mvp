@@ -10,6 +10,7 @@ RUN --mount=type=secret,id=proxy_ca \
     useradd --create-home --uid 10001 leasefit && chown leasefit:leasefit /app
 COPY --chown=leasefit:leasefit . .
 USER leasefit
-RUN SECRET_KEY=build-only-not-runtime DB_ENGINE=sqlite python manage.py collectstatic --noinput
+RUN sed -i 's/\r$//' scripts/start.sh && \
+    SECRET_KEY=build-only-not-runtime DB_ENGINE=sqlite python manage.py collectstatic --noinput
 EXPOSE 8000
 CMD ["sh", "scripts/start.sh"]

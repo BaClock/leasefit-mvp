@@ -1,6 +1,7 @@
 .git
 .venv
 .env
+.env.showcase
 *.sqlite3
 __pycache__
 artifacts

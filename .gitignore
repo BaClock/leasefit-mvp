@@ -1,4 +1,5 @@
 .env
+.env.showcase
 .venv/
 __pycache__/
 *.pyc

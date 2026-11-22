@@ -100,6 +100,8 @@ SECURE_REDIRECT_EXEMPT = [r"^healthz$"]
 SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "0") == "1"
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "sessionid")
+CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "csrftoken")
 SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 # Only enable behind the trusted reverse proxy; the application port must stay private.

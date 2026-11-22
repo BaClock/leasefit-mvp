@@ -15,6 +15,28 @@ from .services import (
 )
 
 
+def power_summary(observations):
+    readings = [
+        row
+        for row in observations
+        if row.characteristic.code == "power_kw"
+        and row.scope == "premises"
+        and not row.superseded
+        and row.source_type != "archive"
+    ]
+    values = {row.value for row in readings if row.value is not None}
+    if len(values) != 1 or any(row.status == "conflict" for row in readings):
+        return None
+    confirmed = any(
+        row.value is not None
+        and row.status == "confirmed"
+        and row.confirmation
+        and row.source_type != "listing"
+        for row in readings
+    )
+    return {"value": values.pop(), "confirmed": confirmed}
+
+
 def for_request_city(catalog, req):
     catalog = catalog.filter(agency_id=req.agency_id)
     if req.city.strip():
@@ -73,7 +95,9 @@ def recommend_catalog_premises(req, catalog, requirements, filters, selected_ids
     candidates = candidates.prefetch_related(
         Prefetch(
             "observations",
-            queryset=ranking_observations([*requirements, *criteria]),
+            queryset=ranking_observations(
+                [*requirements, *criteria], extra_codes=("power_kw",)
+            ),
             to_attr="ranking_observations",
         )
     )
@@ -96,6 +120,7 @@ def recommend_catalog_premises(req, catalog, requirements, filters, selected_ids
         if filters.get("status") and card["status"] != filters["status"]:
             continue
         card["selected"] = obj.pk in selected_ids
+        card["power"] = power_summary(observations)
         card["matched"] = [row for row in card["rows"] if row["status"] == "pass"]
         card["unclear"] = [row for row in card["rows"] if row["status"] == "clarify"]
         card["blockers"] = [row for row in card["rows"] if row["status"] == "blocker"]

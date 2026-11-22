@@ -2,7 +2,7 @@ import hashlib, json
 from collections import defaultdict
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from .models import *
@@ -554,10 +554,15 @@ def suitability_rating(rows, budget_met):
     return score, improvements
 
 
-def ranking_observations(requirements):
-    return Observation.objects.filter(
-        characteristic_id__in={r.characteristic_id for r in requirements}
-    ).order_by("id")
+def ranking_observations(requirements, *, extra_codes=()):
+    return (
+        Observation.objects.filter(
+            Q(characteristic_id__in={r.characteristic_id for r in requirements})
+            | Q(characteristic__code__in=extra_codes)
+        )
+        .select_related("characteristic")
+        .order_by("id")
+    )
 
 
 def assess_premises(req, p, requirements, observations, *, context):
