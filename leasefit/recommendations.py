@@ -7,8 +7,8 @@ from django.db.models import Prefetch, Q
 
 from .geography import district_key, districts_for_city, place_key, requested_districts
 from .models import Characteristic, Requirement
+from .outcomes import GROUPS, budget_excess, outcome_priority
 from .services import (
-    STATUS_ORDER,
     assess_premises,
     assess_requirements,
     ranking_observations,
@@ -75,10 +75,10 @@ def technical_filters(filters):
 
 
 def recommend_catalog_premises(
-    req, catalog, requirements, filters, selected_ids, *, district_names=None
+    req, catalog, requirements, filters, selected_cards, *, district_names=None
 ):
     """Evaluate all eligible candidates before sorting or paginating."""
-    counts = Counter({group: 0 for group in (*STATUS_ORDER, "location")})
+    counts = Counter({group: 0 for group in GROUPS})
     if not any(row.priority == "required" for row in requirements):
         return [], counts
     candidates = for_request_city(catalog, req)
@@ -106,7 +106,7 @@ def recommend_catalog_premises(
         if value not in (None, ""):
             candidates = candidates.filter(**{lookup: value})
     if filters.get("only_new"):
-        candidates = candidates.exclude(pk__in=selected_ids)
+        candidates = candidates.exclude(pk__in=selected_cards)
     criteria = technical_filters(filters)
     candidates = candidates.prefetch_related(
         Prefetch(
@@ -135,7 +135,11 @@ def recommend_catalog_premises(
         observations = obj.ranking_observations
         if criteria and assess_requirements(obj, criteria, observations)[0] != "pass":
             continue
-        card = assess_premises(req, obj, requirements, observations, context=None)
+        card = (
+            dict(selected_cards[obj.pk])
+            if obj.pk in selected_cards
+            else assess_premises(req, obj, requirements, observations, context=None)
+        )
         costs = card["economics"]
         if filters.get("monthly_max") is not None and (
             not costs["complete"]
@@ -144,15 +148,14 @@ def recommend_catalog_premises(
             continue
         if filters.get("only_confirmed") and not card["evidence"]["confirmed"]:
             continue
-        card["catalog_group"] = "location" if location_uncertain else card["status"]
+        card["catalog_group"] = (
+            "location" if location_uncertain else card["outcome"]["group"]
+        )
         counts[card["catalog_group"]] += 1
         if filters.get("status") and card["status"] != filters["status"]:
             continue
-        card["selected"] = obj.pk in selected_ids
+        card["selected"] = obj.pk in selected_cards
         card["power"] = power_summary(observations)
-        card["has_monthly_values"] = any(
-            value is not None for _, value in costs["monthly"][:-1]
-        )
         results.append(card)
     results.sort(key=lambda card: sort_key(card, filters.get("sort")))
     return results, counts
@@ -160,7 +163,7 @@ def recommend_catalog_premises(
 
 def sort_key(card, mode):
     obj = card["p"]
-    status = (card["catalog_group"] == "location", STATUS_ORDER[card["status"]])
+    status = (outcome_priority(card), budget_excess(card))
     score = score_order(card)
     if mode == "monthly":
         costs = card["economics"]

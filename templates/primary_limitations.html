@@ -1,0 +1,6 @@
+{% if review.primary %}
+  <section class="primary-limitations" aria-label="Главные ограничения">
+    <strong class="limitations-title">Главные ограничения</strong>
+    {% for item in review.primary %}{% include "outcome_limit.html" %}{% endfor %}
+  </section>
+{% endif %}

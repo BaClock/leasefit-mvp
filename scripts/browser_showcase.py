@@ -3,6 +3,7 @@
 import argparse
 import os
 import re
+from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -11,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--request-id", type=int, required=True)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     request_url = f"{args.base_url}/app/requests/{args.request_id}"
     with sync_playwright() as playwright:
@@ -30,8 +32,8 @@ def main():
         ).to_be_visible()
         first = cards.filter(has_text="NSK-P01")
         expect(first).to_contain_text("18,00 кВт")
-        expect(first).to_contain_text("Превышение 8 000")
-        expect(first).to_contain_text("Соответствует")
+        expect(first).to_contain_text("превышение составляет 8 000")
+        expect(first).to_contain_text("Технически подходит")
         for width in (1440, 390):
             page.set_viewport_size({"width": width, "height": 1000})
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -109,11 +111,35 @@ def main():
         page.get_by_role("button", name="Далее: уточнить профиль").click()
         page.get_by_role("button", name="Далее: помещения").click()
         expect(cards).to_have_count(20)
+        page.goto(f"{request_url}/refine")
+        page.locator("#id_budget").fill("95000")
+        page.get_by_role("button", name="Далее: помещения").click()
+        expect(
+            page.get_by_role("heading", name="Подходят технически, но превышают бюджет")
+        ).to_be_visible()
+        for width in (1440, 768, 390):
+            page.set_viewport_size({"width": width, "height": 1000})
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            for code, excess, percent in (
+                ("NSK-P01", "28 000", "29,5"),
+                ("NSK-P11", "173 000", "182,1"),
+            ):
+                card = cards.filter(has_text=code)
+                expect(
+                    card.get_by_text("Не подходит по текущему бюджету")
+                ).to_be_visible()
+                expect(card.locator(".primary-limitations")).to_contain_text(
+                    f"+{excess} ₽/мес. (+{percent}%)"
+                )
+                expect(card.locator(".assessment-details")).not_to_have_attribute(
+                    "open", ""
+                )
+                if width == 1440 and args.output:
+                    args.output.mkdir(parents=True, exist_ok=True)
+                    card.screenshot(path=str(args.output / f"{code}.png"))
         assert not errors, errors
         browser.close()
-    print(
-        "PASS: каталог, районы, подбор, сравнение, финансовый сценарий и PDF; 1440 и 390 px."
-    )
+    print("PASS: каталог, районы, подбор, сравнение, бюджет и PDF; 1440, 768 и 390 px.")
 
 
 if __name__ == "__main__":

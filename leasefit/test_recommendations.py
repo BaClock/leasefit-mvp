@@ -78,7 +78,10 @@ class RecommendationTests(TestCase):
             set(card["p"].pk for card in page_cards(response)),
             {self.a.pk, self.b.pk, self.c.pk},
         )
-        self.assertEqual(response.context["recommendation_counts"]["pass"], 3)
+        self.assertEqual(
+            response.context["recommendation_counts"]["finance_clarify"], 2
+        )
+        self.assertEqual(response.context["recommendation_counts"]["over_budget"], 1)
         self.assertEqual(response.context["cards"], [])
         self.assertContains(response, "Выберите интересующие помещения из рекомендаций")
         self.assertContains(response, "Нормативные вопросы к проверке")
@@ -172,7 +175,9 @@ class RecommendationTests(TestCase):
         self.assertIsNone(card["economics"]["start_gap"])
         self.assertNotContains(response, "PRIVATE_UNRELATED_COST_NOTES")
         self.assertContains(response, "Полная сумма требует уточнения")
-        self.assertNotContains(response, "Известные расходы выше лимита")
+        self.assertContains(
+            response, "По указанным расходам превышение составляет 8 000 ₽"
+        )
         self.a.commercial_status = "confirmed"
         self.a.save(update_fields=["commercial_status"])
         response = self.client.get(self.url, {"q": self.a.label})
@@ -423,7 +428,7 @@ class RecommendationTests(TestCase):
         self.assertLessEqual(
             len(captured), 16, [entry["sql"][:200] for entry in captured]
         )
-        self.assertEqual(first.context["recommendation_counts"]["pass"], 500)
+        self.assertEqual(first.context["recommendation_counts"]["finance_clarify"], 500)
         self.assertEqual(first.context["recommendation_page"].paginator.num_pages, 25)
         self.assertEqual(len(page_cards(first)), 20)
         self.assertEqual(page_cards(first)[0]["p"], objects[-1])

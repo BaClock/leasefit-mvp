@@ -158,13 +158,13 @@ class AcceptanceTests(TestCase):
             ],
         )
         self.assertContains(
-            response, '<details class="assessment-details" open>', count=2
+            response, "Посмотреть все ограничения"
         )
         self.assertContains(response, "1 критическое несоответствие", count=2)
         self.assertContains(response, "Почему помещение не подходит")
         self.assertContains(response, "Почему помещение подходит")
         self.assertContains(response, "Что нужно уточнить")
-        self.assertContains(response, "Превышение 3 000 ₽")
+        self.assertContains(response, "По указанным расходам превышение составляет 3 000 ₽")
         self.assertContains(response, "12.00 кВт")
         self.assertContains(response, "Выбрать из каталога")
         self.assertContains(response, "Создать новое помещение")
@@ -516,7 +516,7 @@ class AcceptanceTests(TestCase):
             "Клиентский комментарий",
             "73 000",
             "170 000",
-            "Превышение 3 000",
+            "превышение составляет 3 000",
         ]:
             self.assertIn(s, text)
         for s in [
@@ -531,7 +531,7 @@ class AcceptanceTests(TestCase):
         self.result()
         r = self.issue()
         self.assertEqual(
-            r.snapshot["objects"][0]["decision"], "Отсеян при текущих условиях"
+            r.snapshot["objects"][0]["decision"], "Есть критические технические несоответствия"
         )
 
     def test_differences_keeps_equal_blockers_and_unknown(self):
@@ -1130,8 +1130,8 @@ class AcceptanceTests(TestCase):
         text = "".join(p.extract_text() for p in reader.pages)
         for phrase in [
             "Блокер",
-            "Отсеян при текущих условиях",
-            "Превышение 3 000",
+            "Есть критические технические несоответствия",
+            "превышение составляет 3 000",
             "Условный акт",
             "Источники",
             "Допущения",

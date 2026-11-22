@@ -5,8 +5,13 @@
   <div class="metrics">
     <div>
       <small>{% if e.complete %}Полная месячная нагрузка{% else %}Известный месячный подытог{% endif %}</small>
-      <strong>{{ e.monthly_total|rub }}</strong>
-      <span class="{% if e.gap|positive %}budget-over{% else %}muted{% endif %}">{{ e.budget_label }}</span>
+      {% if outcome %}
+        <strong>{{ outcome.monthly.amount|rub }}</strong>
+        <span class="{% if outcome.monthly.state == 'over' %}budget-over{% else %}muted{% endif %}">{{ outcome.monthly.label }}</span>
+      {% else %}
+        <strong>{{ e.monthly_total|rub }}</strong>
+        <span class="muted">{{ e.budget_label }}</span>
+      {% endif %}
     </div>
     <div>
       <small>{% if e.once_complete %}Разовые затраты{% else %}Известный разовый подытог{% endif %}</small>

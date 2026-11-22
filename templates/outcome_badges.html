@@ -1,0 +1,12 @@
+<div class="outcome-statuses">
+  {% if show_check and not checked %}
+    <span class="pill neutral">Не проверено — пересчитайте</span>
+  {% else %}
+    <span class="pill {% if review.group == 'blocker' %}blocker{% elif review.group == 'recommended' and not location_pending %}pass{% else %}neutral{% endif %}">{{ review.technical_label }}</span>
+  {% endif %}
+  <span class="pill {% if review.monthly.state == 'over' %}blocker{% elif review.monthly.state == 'within' and review.monthly.confirmed %}pass{% else %}clarify{% endif %}">{{ review.monthly.label }}</span>
+</div>
+<p class="outcome-verdict {% if review.group == 'blocker' or review.group == 'over_budget' %}outcome-critical{% elif review.group != 'recommended' or location_pending %}outcome-warning{% else %}outcome-positive{% endif %}">
+  {% if location_pending and review.group == 'recommended' %}Требует уточнения местоположения{% else %}{{ review.label }}{% endif %}
+</p>
+{% if not review.monthly.confirmed %}<p class="outcome-evidence">{{ review.monthly.evidence }} {{ review.monthly.source }}</p>{% endif %}

@@ -154,7 +154,7 @@ class DistrictPickerTests(TestCase):
         self.b.save(update_fields=["district"])
         page = self.client.get(self.objects)
         groups = page.context["recommendation_groups"]
-        self.assertEqual(groups["pass"], [])
+        self.assertEqual(groups["recommended"], [])
         self.assertEqual({card["p"] for card in groups["location"]}, {self.a, self.b})
         actual = next(card for card in groups["location"] if card["p"] == self.a)
         self.assertEqual(actual["status"], initial["status"])

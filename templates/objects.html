@@ -13,8 +13,10 @@
     </div>
     <dl class="recommendation-summary">
       <div><dt>В каталоге</dt><dd>{{ catalog_count }}</dd></div>
-      <div><dt>Соответствуют</dt><dd>{{ recommendation_counts.pass|default:"0" }}</dd></div>
-      <div><dt>Требуют уточнения</dt><dd>{{ recommendation_counts.clarify|default:"0" }}</dd></div>
+      <div><dt>Рекомендуемые</dt><dd>{{ recommendation_counts.recommended|default:"0" }}</dd></div>
+      <div><dt>Выше бюджета</dt><dd>{{ recommendation_counts.over_budget|default:"0" }}</dd></div>
+      <div><dt>Уточнить расходы</dt><dd>{{ recommendation_counts.finance_clarify|default:"0" }}</dd></div>
+      <div><dt>Уточнить требования</dt><dd>{{ recommendation_counts.technical_clarify|default:"0" }}</dd></div>
       <div><dt>Есть блокеры</dt><dd>{{ recommendation_counts.blocker|default:"0" }}</dd></div>
       {% if recommendation_counts.location %}<div><dt>Уточнить местоположение</dt><dd>{{ recommendation_counts.location }}</dd></div>{% endif %}
       <div><dt>Уже выбрано</dt><dd>{{ cards|length }}</dd></div>
@@ -45,18 +47,24 @@
           </div>
         </form>
       </details>
-      {% if not recommendation_filters.errors and not recommendation_counts.pass and not unmatched_districts %}
+      {% if not recommendation_filters.errors and not recommendation_counts.recommended and not unmatched_districts %}
         <p>Подтверждённых подходящих помещений пока не найдено.</p>
       {% endif %}
-      {% if recommendation_groups.pass %}
-        {% include "recommendation_group.html" with title="Соответствуют требованиям" items=recommendation_groups.pass %}
+      {% if recommendation_groups.recommended %}
+        {% include "recommendation_group.html" with title="Рекомендуемые помещения" items=recommendation_groups.recommended %}
       {% endif %}
-      {% if recommendation_groups.clarify %}
-        {% include "recommendation_group.html" with title="Требуют уточнения" items=recommendation_groups.clarify %}
+      {% if recommendation_groups.finance_clarify %}
+        {% include "recommendation_group.html" with title="Требуют финансового уточнения" items=recommendation_groups.finance_clarify %}
+      {% endif %}
+      {% if recommendation_groups.over_budget %}
+        {% include "recommendation_group.html" with title="Подходят технически, но превышают бюджет" items=recommendation_groups.over_budget %}
+      {% endif %}
+      {% if recommendation_groups.technical_clarify %}
+        {% include "recommendation_group.html" with title="Требуют технического уточнения" items=recommendation_groups.technical_clarify %}
       {% endif %}
       {% if recommendation_groups.blocker %}
         <details class="recommendation-blockers"{% if recommendation_filters.cleaned_data.status == "blocker" %} open{% endif %}>
-          <summary>Не соответствуют требованиям ({{ recommendation_counts.blocker }})</summary>
+          <summary>Не подходят по техническим требованиям ({{ recommendation_counts.blocker }})</summary>
           {% include "recommendation_group.html" with title="" items=recommendation_groups.blocker %}
         </details>
       {% endif %}

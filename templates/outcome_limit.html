@@ -1,0 +1,20 @@
+{% load leasefit_tags %}
+<div class="outcome-limit {% if item.kind == 'question' %}outcome-warning{% else %}outcome-critical{% endif %}">
+  <strong>{{ item.title }}</strong>
+  {% if item.kind == "monthly" %}
+    <dl class="outcome-numbers">
+      <div><dt>Бюджет</dt><dd>{{ review.monthly.budget|rub }}/мес.</dd></div>
+      <div><dt>{% if review.monthly.complete %}Расходы помещения{% else %}Известные расходы{% endif %}</dt><dd>{{ review.monthly.amount|rub }}/мес.</dd></div>
+      <div><dt>Превышение</dt><dd>+{{ review.monthly.difference|rub }}/мес.{% if review.monthly.percent %} (+{{ review.monthly.percent }}%){% endif %}</dd></div>
+    </dl>
+    {% if not review.monthly.complete %}<p>Полная сумма требует уточнения.</p>{% endif %}
+  {% elif item.kind == "start" %}
+    <dl class="outcome-numbers">
+      <div><dt>Стартовый бюджет</dt><dd>{{ item.budget|rub }}</dd></div>
+      <div><dt>Затраты на открытие</dt><dd>{{ item.amount|rub }}</dd></div>
+    </dl>
+  {% elif item.detail %}
+    <p>{{ item.detail }}</p>
+  {% endif %}
+  {% if item.action %}<p>{{ item.action }}</p>{% endif %}
+</div>

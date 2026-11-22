@@ -4,22 +4,26 @@
     <h4>{{ card.p.label }}</h4>
     {% if card.catalog_group == "location" %}
       <span class="pill clarify">Местоположение требует уточнения</span>
-    {% else %}
-      <span class="pill {{ card.status }}">
-        {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
-      </span>
     {% endif %}
   </header>
+  {% if card.catalog_group == "location" %}
+    {% include "outcome_badges.html" with review=card.outcome location_pending=True only %}
+  {% else %}
+    {% include "outcome_badges.html" with review=card.outcome only %}
+  {% endif %}
   <p class="muted">
     {% if card.p.city %}{{ card.p.city }}{% endif %}{% if card.p.city and card.p.district %} · {% endif %}{% if card.p.district %}{{ card.p.district }}{% endif %}
-    {% if card.catalog_group == "location" %}{% if card.p.city or card.p.district %} · {% endif %}Техническая оценка: {% if card.status == "pass" %}соответствует{% elif card.status == "blocker" %}не соответствует{% else %}требует уточнения{% endif %}
-    {% elif not card.p.location_confirmed or not card.p.city %}{% if card.p.city or card.p.district %} · {% endif %}Местоположение требует уточнения{% endif %}
+    {% if card.catalog_group != "location" %}
+      {% if not card.p.location_confirmed or not card.p.city %}{% if card.p.city or card.p.district %} · {% endif %}Местоположение требует уточнения{% endif %}
+    {% endif %}
   </p>
   <p>{{ card.p.get_premises_type_display }}{% if card.p.area is not None %} · {{ card.p.area }} м²{% endif %}{% if card.p.floor %} · Этаж {{ card.p.floor }}{% endif %}{% if card.power %} · {{ card.power.value }} кВт{% if not card.power.confirmed %} (не подтверждено){% endif %}{% endif %}</p>
+  {% include "primary_limitations.html" with review=card.outcome %}
   <dl class="recommendation-summary recommendation-facts">
     <div><dt>Рейтинг</dt><dd>{% if card.score is not None %}{{ card.score }} / 100{% else %}—{% endif %}</dd></div>
     <div><dt>Базовая аренда</dt><dd>{{ card.economics.base|rub }}</dd></div>
-    <div><dt>{% if card.economics.complete %}Месячная нагрузка{% else %}Известные расходы в месяц{% endif %}</dt><dd>{% if card.has_monthly_values %}{{ card.economics.monthly_total|rub }}{% else %}Неизвестно{% endif %}</dd></div>
+    <div><dt>{% if card.economics.complete %}Месячная нагрузка{% else %}Известные расходы{% endif %}</dt><dd>{{ card.outcome.monthly.amount|rub }}</dd></div>
+    <div><dt>Отклонение от бюджета</dt><dd class="{% if card.outcome.monthly.state == 'over' %}status-text blocker{% endif %}">{% if card.outcome.monthly.difference is not None %}{{ card.outcome.monthly.sign }}{{ card.outcome.monthly.difference|rub }}/мес.{% else %}—{% endif %}</dd></div>
   </dl>
   {% if card.score is None %}<p class="muted">Недостаточно данных для расчёта рейтинга.</p>{% endif %}
   {% if not card.economics.complete %}<p class="muted">Полная сумма требует уточнения.</p>{% endif %}

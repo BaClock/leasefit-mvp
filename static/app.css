@@ -1616,8 +1616,72 @@ button.secondary {
   margin-top: 10px;
   font-size: 13px;
 }
-.assessment .assessment-budget {
-  margin: 0 0 8px;
+.outcome-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 9px 0 0;
+}
+.outcome-statuses .pill {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.outcome-verdict {
+  margin: 7px 0;
+  font-weight: 700;
+}
+.outcome-evidence {
+  margin: 5px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.outcome-critical {
+  color: var(--red);
+}
+.outcome-warning {
+  color: var(--amber);
+}
+.outcome-positive {
+  color: var(--green);
+}
+.primary-limitations {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+}
+.limitations-title {
+  font-size: 13px;
+}
+.outcome-limit {
+  border: 1px solid #efb6bd;
+  background: #fff1f3;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.outcome-limit.outcome-warning {
+  border-color: #ead09a;
+  background: #fff8e9;
+}
+.outcome-limit p {
+  color: var(--text);
+  margin: 3px 0 0;
+}
+.outcome-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 6px 0 0;
+}
+.outcome-numbers dt {
+  color: var(--muted);
+}
+.outcome-numbers dd {
+  color: var(--text);
+  font-weight: 600;
+  margin: 0;
 }
 .assessment .assessment-counts {
   display: flex;
@@ -1707,6 +1771,9 @@ button.secondary {
 }
 .recommendation-card-actions {
   margin-top: 12px;
+}
+.recommendation-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 [data-district-field] legend {
   padding: 0;

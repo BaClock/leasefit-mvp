@@ -35,7 +35,8 @@
               <tr>
                 <th>Параметр / состав отчёта</th>{% for c in columns %}<th>
                   <a href="{% url 'premises' req.pk c.p.pk %}">{{ c.p.label }} ↗</a>
-                  <p class="pill {% if c.ev %}{{ c.ev.result.status }}{% else %}neutral{% endif %}">{% if c.ev %}{{ c.ev.result.label }}{% else %}Не проверено — пересчитайте{% endif %}</p>
+                  {% include "outcome_badges.html" with review=c.outcome checked=c.ev show_check=True only %}
+                  {% include "primary_limitations.html" with review=c.outcome %}
                   <small>{{ c.ev.created_at|date:'d.m.Y H:i' }}</small>
                 </th>
       {% endfor %}
@@ -66,9 +67,10 @@
       </th>
       {% for c in columns %}
         <td>
-          <strong class="price">{{ c.e.monthly_total|rub }}</strong>
+          <strong class="price">{{ c.outcome.monthly.amount|rub }}</strong>
           <p>{% if c.e.complete %}Полная нагрузка{% else %}Известный подытог{% endif %}</p>
-          <p class="{% if c.e.gap|positive %}budget-over{% endif %}">{{ c.e.budget_label }}</p>{% if c.e.missing %}<p class="warning-text">Пропуски: {{ c.e.missing|join:', ' }}</p>{% endif %}</td>{% endfor %}</tr>
+          {% for item in c.outcome.financial_limits %}{% include "outcome_limit.html" with review=c.outcome %}{% endfor %}
+          {% if c.e.missing %}<p class="warning-text">Пропуски: {{ c.e.missing|join:', ' }}</p>{% endif %}</td>{% endfor %}</tr>
       <tr>
         <th>Разовые платежи / депозит</th>{% for c in columns %}<td>{{ c.e.once_total|rub }}<p>{% if c.e.once_complete %}Полная сумма{% else %}Известный подытог: {{ c.e.once_missing|join:', ' }}{% endif %}</p>
         <small>Депозит отдельно от месяца.</small>
@@ -84,13 +86,15 @@
   {% for c in columns %}
     <section class="panel">
       <h2>{{ c.p.label }}</h2>
-      <p class="pill {% if c.ev %}{{ c.ev.result.status }}{% else %}neutral{% endif %}">{% if c.ev %}{{ c.ev.result.label }}{% else %}Не проверено — пересчитайте{% endif %}</p>{% for r in c.comparison_rows %}<article class="check-row {{ r.cell.status }}">
+      {% include "outcome_badges.html" with review=c.outcome checked=c.ev show_check=True only %}
+      {% include "primary_limitations.html" with review=c.outcome %}
+      {% for r in c.comparison_rows %}<article class="check-row {{ r.cell.status }}">
         <h3>{{ r.name }}</h3>
         <strong>{{ r.cell.label }}</strong>
         <p>{{ r.cell.value }}</p>
         <p>{{ r.cell.reason }}</p>{% if r.cell.question %}<p class="question">{{ r.cell.question }}</p>{% endif %}
         {% for src in r.cell.sources %}<p class="source">{{ src.source }} · {{ src.date }}</p>{% endfor %}</article>{% endfor %}
-    {% include "economics.html" with e=c.e %}
+    {% include "economics.html" with e=c.e outcome=c.outcome %}
   </section>
 {% endfor %}
 </div>
@@ -124,10 +128,8 @@
         {% for c in preview.objects %}
           <article class="preview-tile">
             <h3>{{ c.title }}</h3>
-            <span class="pill {{ c.status }}">{{ c.label }}</span>
-            <p>{{ c.decision }}</p>
-            <strong class="price">{{ c.economics.monthly_total|rub }}/мес.</strong>
-            <p>{{ c.economics.budget_label }}</p>
+            {% include "outcome_badges.html" with review=c.outcome only %}
+            {% if c.outcome.monthly.amount is not None %}<strong class="price">{{ c.outcome.monthly.amount|rub }}/мес.</strong>{% endif %}
             <small>{{ c.rows|length }} параметров с причинами и источниками</small>
           </article>
         {% endfor %}

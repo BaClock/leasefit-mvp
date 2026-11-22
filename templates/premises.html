@@ -15,6 +15,12 @@
         <a class="button secondary" href="{% url 'delete_premises' p.pk %}">Удалить помещение</a>
       {% endif %}
     </div>
+    {% if outcome %}
+      <section class="panel" aria-label="Итог проверки">
+        {% include "outcome_badges.html" with review=outcome checked=ev show_check=True only %}
+        {% include "primary_limitations.html" with review=outcome %}
+      </section>
+    {% endif %}
     {% if shared %}<div class="notice warning">Помещение используется в нескольких запросах ({{ use_count }}). Изменение общих характеристик потребует пересчёта связанных оценок. Перед сохранением подтвердите изменение.</div>{% endif %}
     <form method="post" class="dirty-form">
       {% csrf_token %}

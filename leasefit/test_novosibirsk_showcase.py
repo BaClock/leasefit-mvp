@@ -3,15 +3,18 @@ from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
 from uuid import uuid4
+from io import BytesIO
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
+from pypdf import PdfReader
 
 from .management.commands import seed_novosibirsk_showcase as showcase
 from .metrics import financial_metrics
+from .outcomes import assess_outcome, budget_excess, monthly_outcome, outcome_priority
 from .models import (
     Agency,
     ClientRequest,
@@ -21,7 +24,7 @@ from .models import (
     Report,
     RequestPremises,
 )
-from .services import economics, evaluate, issue_report
+from .services import current_evaluation, economics, evaluate, issue_report
 
 
 class ShowcaseTests(TestCase):
@@ -51,6 +54,119 @@ class ShowcaseTests(TestCase):
         response = self.client.get(reverse("objects", args=[req.pk]))
         self.assertEqual(response.status_code, 200)
         return list(response.context["recommendation_page"])
+
+    def test_budget_excess_is_visible_and_prioritized_at_equal_fit_scores(self):
+        req = self.profile("NSK-B01")
+        req.budget = Decimal(95000)
+        req.save(update_fields=["budget"])
+        p01, p11 = self.premises("NSK-P01"), self.premises("NSK-P11")
+        page = self.client.get(reverse("objects", args=[req.pk]))
+        cards = [
+            card
+            for card in page.context["recommendation_groups"]["over_budget"]
+            if card["p"] in (p01, p11)
+        ]
+        self.assertEqual([card["p"] for card in cards], [p01, p11])
+        self.assertEqual(cards[0]["score"], cards[1]["score"])
+        for card, difference, percent in zip(
+            cards, ("28000.00", "173000.00"), ("29,5", "182,1")
+        ):
+            self.assertEqual(card["status"], "pass")
+            self.assertEqual(
+                card["outcome"]["label"], "Не подходит по текущему бюджету"
+            )
+            self.assertEqual(card["outcome"]["monthly"]["difference"], difference)
+            self.assertEqual(card["outcome"]["monthly"]["percent"], percent)
+        for phrase in (
+            "28 000 ₽",
+            "173 000 ₽",
+            "Коммерческие условия требуют подтверждения",
+        ):
+            self.assertContains(page, phrase)
+
+    def test_financial_status_handles_incomplete_conflicting_and_zero_budget(self):
+        req = self.profile("NSK-B01")
+        obj = self.premises("NSK-P01")
+        req.budget = Decimal(95000)
+        obj.utilities = None
+
+        def monthly():
+            return monthly_outcome(obj, req, economics(obj, req, context=None))
+
+        self.assertEqual(monthly()["state"], "over")
+        self.assertEqual(Decimal(monthly()["amount"]), 117000)
+        self.assertFalse(monthly()["complete"])
+        self.assertFalse(monthly()["confirmed"])
+        req.budget = Decimal(117000)
+        self.assertEqual(monthly()["state"], "clarify")
+        self.assertIsNone(monthly()["difference"])
+        req.budget = Decimal(0)
+        self.assertEqual(monthly()["state"], "over")
+        self.assertIsNone(monthly()["percent"])
+        obj.rate = Decimal(1)
+        self.assertEqual(monthly()["state"], "clarify")
+        req.budget = None
+        self.assertEqual(monthly()["state"], "unset")
+        req.budget = Decimal(130000)
+        obj.rate = None
+        obj.utilities = Decimal(6000)
+        obj.vat_mode, obj.vat_rate = "excluded", Decimal(20)
+        self.assertEqual(Decimal(monthly()["amount"]), 145000)
+        self.assertEqual(monthly()["state"], "over")
+        obj.rent = Decimal(50000)
+        obj.commercial_status = "confirmed"
+        outcome = assess_outcome(
+            req, obj, "pass", [], economics(obj, req, context=None), None
+        )
+        self.assertEqual(outcome["label"], "Подходит по проверенным условиям")
+        outcome = assess_outcome(
+            req, obj, "blocker", [], economics(obj, req, context=None), None
+        )
+        self.assertEqual(outcome["group"], "blocker")
+
+    def test_comparison_pdf_and_live_recalculation_share_financial_outcome(self):
+        req = self.profile("NSK-B01")
+        obj = self.premises("NSK-P01")
+        req.budget = Decimal(95000)
+        req.save(update_fields=["budget"])
+        link = RequestPremises.objects.create(request=req, premises=obj)
+        before = evaluate(obj, self.user, req)
+        report = issue_report(req, [obj], "", self.user, uuid4())
+        original = bytes(report.pdf)
+        for url in (
+            reverse("compare", args=[req.pk]),
+            reverse("premises", args=[req.pk, obj.pk]),
+        ):
+            response = self.client.get(url)
+            self.assertContains(response, before.result["outcome"]["label"])
+            self.assertContains(response, "28 000 ₽")
+        pdf = "".join(
+            page.extract_text() for page in PdfReader(BytesIO(original)).pages
+        )
+        self.assertIn("Не подходит по текущему бюджету", pdf)
+        self.assertIn("28 000", pdf)
+        req.budget = Decimal(130000)
+        req.version += 1
+        req.save(update_fields=["budget", "version"])
+        self.assertIsNone(current_evaluation(obj, req))
+        card = next(card for card in self.results(req) if card["p"] == obj)
+        self.assertEqual(card["outcome"]["monthly"]["difference"], "7000.00")
+        obj.rent = Decimal(160000)
+        obj.version += 1
+        obj.save(update_fields=["rent", "version"])
+        card = next(card for card in self.results(req) if card["p"] == obj)
+        self.assertEqual(card["outcome"]["monthly"]["difference"], "43000.00")
+        link.adaptation = link.other_once = link.equipment = link.initial_stock = (
+            link.cash_reserve
+        ) = Decimal(100000)
+        link.save()
+        card = next(card for card in self.results(req) if card["p"] == obj)
+        self.assertEqual(
+            [item["kind"] for item in card["outcome"]["financial_limits"]],
+            ["monthly", "start"],
+        )
+        report.refresh_from_db()
+        self.assertEqual(bytes(report.pdf), original)
 
     def test_import_identity_idempotence_and_isolation(self):
         self.assertFalse(self.user.has_usable_password())
@@ -116,7 +232,6 @@ class ShowcaseTests(TestCase):
             showcase.import_data(bad)
 
     def test_all_acceptance_cases_and_full_catalog_order(self):
-        rank = {"pass": 0, "clarify": 1, "blocker": 2}
         by_profile = {}
         for profile in self.data["business_profiles"]:
             req = self.profile(profile["external_id"])
@@ -124,7 +239,8 @@ class ShowcaseTests(TestCase):
             self.assertEqual(len(cards), 20)
             keys = [
                 (
-                    rank[card["status"]],
+                    outcome_priority(card),
+                    budget_excess(card),
                     -card["score"] if card["score"] is not None else 1,
                 )
                 for card in cards

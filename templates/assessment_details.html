@@ -1,6 +1,5 @@
 {% load leasefit_tags %}
 <div class="assessment">
-  {% if req.budget is not None %}<p class="assessment-budget">{{ card.economics.budget_label }}.</p>{% endif %}
   {% with blockers=card.blockers|length unclear=card.unclear_count matched=card.matched|length %}
     <ul class="assessment-counts" aria-label="Сводка причин оценки" role="list">
       <li><span class="assessment-icon assessment-blocker" aria-hidden="true">×</span> {{ blockers }} {{ blockers|ru_plural:"критическое несоответствие,критических несоответствия,критических несоответствий" }}</li>
@@ -8,10 +7,10 @@
       <li><span class="assessment-icon assessment-pass" aria-hidden="true">✓</span> {{ matched }} {{ matched|ru_plural:"требование выполнено,требования выполнены,требований выполнено" }}</li>
     </ul>
   {% endwith %}
-  {% if card.blockers or card.unclear or card.matched or card.unmet_preferences or card.economics.missing %}
-    <details class="assessment-details"{% if card.blockers or card.status == "blocker" %} open{% endif %}>
+  {% if card.blockers or card.unclear or card.matched or card.unmet_preferences or card.economics.missing or card.outcome.financial_limits %}
+    <details class="assessment-details">
       <summary>
-        <span class="assessment-show">{% if card.blockers or card.status == "blocker" %}Почему помещение не подходит{% elif card.status == "pass" %}Почему помещение подходит{% else %}Что нужно уточнить{% endif %}</span>
+        <span class="assessment-show">{% if card.outcome.primary %}Посмотреть все ограничения{% else %}Почему помещение подходит{% endif %}</span>
         <span class="assessment-hide">Скрыть детали</span>
       </summary>
       <div class="assessment-sections">
@@ -24,6 +23,9 @@
             <ul>{% for row in card.blockers %}<li><strong>{{ row.requirement }}</strong> · {{ row.value|default:row.reason }}{% if row.adjustment %}<div>{{ row.adjustment }}</div>{% endif %}</li>{% endfor %}</ul>
           </section>
         {% endif %}
+        {% for item in card.outcome.financial_limits %}
+          {% include "outcome_limit.html" with review=card.outcome %}
+        {% endfor %}
         {% if card.unclear %}
           <section class="assessment-section assessment-clarify">
             <h5>Что нужно уточнить</h5>

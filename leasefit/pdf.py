@@ -116,7 +116,7 @@ def render_pdf(s):
         )
         return table
 
-    def metrics(e):
+    def metrics(e, monthly=None):
         labels = [
             (
                 "Полная месячная нагрузка"
@@ -126,7 +126,11 @@ def render_pdf(s):
             "Разовые затраты" if e["once_complete"] else "Известный разовый подытог",
             "Допустимая базовая аренда",
         ]
-        vals = [e["monthly_total"], e["once_total"], e["allowed_rent"]]
+        vals = [
+            monthly["amount"] if monthly else e["monthly_total"],
+            e["once_total"],
+            e["allowed_rent"],
+        ]
         cells = [
             panel([para(label, "small"), para(money(v), "metric")], (width - 20) / 3)
             for label, v in zip(labels, vals)
@@ -177,14 +181,25 @@ def render_pdf(s):
     cards = []
     for i, obj in enumerate(s["objects"], 1):
         e = obj["economics"]
+        outcome = obj.get("outcome")
+        monthly = outcome["monthly"] if outcome else None
+        amount = monthly["amount"] if monthly else e["monthly_total"]
         cards.append(
             panel(
                 [
                     para(f"{i:02d} · {obj['title']}", "h2"),
-                    para(obj["label"]),
+                    para(outcome["technical_label"] if outcome else obj["label"]),
                     para(obj["decision"]),
-                    para(money(e["monthly_total"]) + " / мес.", "metric"),
-                    para(e["budget_label"], "small"),
+                    para(
+                        money(amount) + (" / мес." if amount is not None else ""),
+                        "metric",
+                    ),
+                    para(monthly["label"] if monthly else e["budget_label"], "small"),
+                    *(
+                        [para(monthly["evidence"], "small")]
+                        if monthly and not monthly["confirmed"]
+                        else []
+                    ),
                     para(
                         (
                             "Полная нагрузка"
@@ -225,12 +240,14 @@ def render_pdf(s):
 
     selected = set(s.get("parameters", []))
     for index, obj in enumerate(s["objects"], 1):
+        outcome = obj.get("outcome")
+        monthly = outcome["monthly"] if outcome else None
         story.append(PageBreak())
         title(f"{index:02d} · {obj['title']}")
         story.append(
             panel(
                 [
-                    para(obj["label"], "h2"),
+                    para(outcome["technical_label"] if outcome else obj["label"], "h2"),
                     para(obj["decision"]),
                     para(
                         "Дата проверки: "
@@ -243,8 +260,25 @@ def render_pdf(s):
         )
         p("Расходы и бюджет", "h2")
         e = obj["economics"]
-        metrics(e)
-        p(e["budget_label"])
+        metrics(e, monthly)
+        p(monthly["label"] if monthly else e["budget_label"])
+        if monthly:
+            p(monthly["evidence"], "small")
+            for item in outcome["financial_limits"]:
+                if item["kind"] == "monthly":
+                    subtotal = (
+                        "Месячная нагрузка"
+                        if monthly["complete"]
+                        else "Известный месячный подытог"
+                    )
+                    percent = f" (+{monthly['percent']}%)" if monthly["percent"] else ""
+                    p(
+                        f"Бюджет: {money(monthly['budget'])}/мес. {subtotal}: "
+                        f"{money(monthly['amount'])}/мес. Отклонение: +{money(monthly['difference'])}/мес.{percent}."
+                    )
+                else:
+                    p(item["title"])
+                p(item["action"], "small")
         if e["missing"]:
             p("Не определено / конфликт: " + ", ".join(e["missing"]))
         if e["once_missing"]:
@@ -254,7 +288,7 @@ def render_pdf(s):
             + ("подтверждена" if e["deposit_refundable"] else "не подтверждена")
             + "."
         )
-        if e["start_gap"] is not None:
+        if not outcome and e["start_gap"] is not None:
             p("Отклонение от стартового бюджета: " + money(e["start_gap"]))
         p("Технические требования и причины", "h2")
         for row in obj["rows"]:

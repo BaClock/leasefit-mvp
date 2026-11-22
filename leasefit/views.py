@@ -19,6 +19,7 @@ from django.core import signing
 from django.core.paginator import Paginator
 from .business import FORMATS, TEMPLATE_VERSION, recommendations
 from .business_forms import BusinessSetupForm
+from .outcomes import GROUPS as OUTCOME_GROUPS, assess_outcome
 from .geography import district_key, requested_districts
 from .metric_forms import FinancialPlanForm
 from .metrics import METHODS, INSUFFICIENT
@@ -322,7 +323,7 @@ def objects(request, pk):
     requirements = active_requirements(obj)
     cards, ranking_ready = rank_premises(obj, requirements=requirements)
     catalog = catalog_scope(request)
-    selected_ids = {card["p"].pk for card in cards}
+    selected_cards = {card["p"].pk: card for card in cards}
     catalog_count = catalog.count()
     city_catalog = for_request_city(catalog, obj)
     districts = list(
@@ -348,13 +349,13 @@ def objects(request, pk):
             catalog,
             requirements,
             form.cleaned_data,
-            selected_ids,
+            selected_cards,
             district_names=district_names,
         )
     page = Paginator(recommendations, 20).get_page(request.GET.get("page"))
     groups = {
         group: [card for card in page if card["catalog_group"] == group]
-        for group in (*STATUS_ORDER, "location")
+        for group in OUTCOME_GROUPS
     }
     filter_params = request.GET.copy()
     filter_params.pop("page", None)
@@ -603,10 +604,17 @@ def property_page(
     )
     if req and p.pk:
         link = get_object_or_404(RequestPremises, request=req, premises=p)
+        ev = current_evaluation(p, req)
+        costs = economics(p, req, context=link)
         ctx.update(
             context_form=context_form or ContextForm(instance=link),
-            ev=current_evaluation(p, req),
-            economics=economics(p, req),
+            ev=ev,
+            economics=costs,
+            outcome=(
+                ev.result["outcome"]
+                if ev
+                else assess_outcome(req, p, "clarify", [], costs, link)
+            ),
             regulatory=regulatory_checklist(req, link, with_notes=True),
             regulatory_references=REFERENCES,
             regulatory_status=REGULATORY_STATUS,
@@ -1058,17 +1066,30 @@ def compare(request, pk):
             row["key"] = f"requirement:{criterion.pk}" if criterion else ""
             row["mandatory"] = criterion and criterion.priority == "required"
             row["included"] = row["mandatory"] or row["key"] in obj.report_parameters
-        columns = [
-            {
-                "p": p,
-                "ev": current_evaluation(p, obj),
-                "e": economics(p, obj),
-                "comparison_rows": [
-                    {"name": r["name"], "cell": r["cells"][i]} for r in rows
-                ],
-            }
-            for i, p in enumerate(selected)
-        ]
+        links = {
+            link.premises_id: link
+            for link in obj.premises_links.filter(premises__in=selected)
+        }
+        columns = []
+        for i, p in enumerate(selected):
+            ev = current_evaluation(p, obj)
+            link = links.get(p.pk)
+            costs = economics(p, obj, context=link)
+            columns.append(
+                {
+                    "p": p,
+                    "ev": ev,
+                    "e": costs,
+                    "outcome": (
+                        ev.result["outcome"]
+                        if ev
+                        else assess_outcome(obj, p, "clarify", [], costs, link)
+                    ),
+                    "comparison_rows": [
+                        {"name": r["name"], "cell": r["cells"][i]} for r in rows
+                    ],
+                }
+            )
         try:
             preview = report_snapshot(
                 obj,

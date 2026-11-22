@@ -17,9 +17,9 @@ from .operations import (
 from .metrics import financial_metrics, evidence_summary
 from .regulations import regulatory_checklist
 from .geography import district_description
+from .outcomes import assess_outcome, budget_excess, money_text, outcome_priority
 
-RULES_VERSION = "p0-3.1"
-STATUS_ORDER = {"pass": 0, "clarify": 1, "blocker": 2}
+RULES_VERSION = "p0-3.2"
 LOAD_LINK = object()
 LABELS = {
     "blocker": "Не соответствует · подтверждённый блокер",
@@ -33,12 +33,6 @@ ROW_LABELS = {
     "pass": "Соответствует",
     "desired_fail": "Желательное не выполнено",
 }
-
-
-def money_text(value):
-    value = Decimal(str(value))
-    places = 0 if value == value.to_integral() else 2
-    return f"{value:,.{places}f}".replace(",", " ").replace(".", ",") + " ₽"
 
 
 def serial(value):
@@ -589,6 +583,7 @@ def assess_premises(req, p, requirements, observations, *, context):
         "p": p,
         "status": status,
         "score": score,
+        "outcome": assess_outcome(req, p, status, rows, costs, context),
         "improvements": improvements,
         "budget_action": budget_action,
         "economics": costs,
@@ -632,7 +627,12 @@ def rank_premises(req, *, requirements=None):
         for link in links
     ]
     cards.sort(
-        key=lambda card: (STATUS_ORDER[card["status"]], score_order(card), card["p"].pk)
+        key=lambda card: (
+            outcome_priority(card),
+            budget_excess(card),
+            score_order(card),
+            card["p"].pk,
+        )
     )
     return cards, ready
 
@@ -661,6 +661,7 @@ def evaluate(p, user, request_obj):
         "label": LABELS[status],
         "rows": rows,
         "economics": costs,
+        "outcome": assess_outcome(req, p, status, rows, costs, context),
         "financial": serial(financial_metrics(req, p, context, costs)),
         "fit_score": suitability_rating(rows, budget_result(p, costs))[0],
         "evidence_summary": evidence_summary(rows),
@@ -736,11 +737,7 @@ def report_snapshot(req, objects, comment, parameters=None):
             raise ValueError(
                 f"{p.label}: оценка устарела или отсутствует. Пересчитайте перед выпуском PDF."
             )
-        decision = {
-            "pass": "Можно рассматривать с учётом экономики",
-            "clarify": "Только условное рассмотрение после уточнений",
-            "blocker": "Отсеян при текущих условиях",
-        }[ev.result["status"]]
+        decision = ev.result["outcome"]["label"]
         items.append(
             {
                 "id": p.pk,

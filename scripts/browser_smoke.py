@@ -187,15 +187,12 @@ with sync_playwright() as pw:
         card = page.locator(".recommendation-card").filter(has_text=f"{label} {tag}")
         expect(card).to_be_visible()
         reasons = card.locator(".assessment-details")
-        expect(reasons).to_have_attribute("open", "")
-        expect(
-            reasons.get_by_role("heading", name="Критические несоответствия")
-        ).to_be_visible()
+        expect(reasons).not_to_have_attribute("open", "")
+        expect(card.locator(".primary-limitations")).to_be_visible()
         toggle = reasons.locator("summary")
+        expect(toggle).to_have_text("Посмотреть все ограничения", use_inner_text=True)
+        toggle.click()
         expect(toggle).to_have_text("Скрыть детали", use_inner_text=True)
-        toggle.click()
-        expect(toggle).to_have_text("Почему помещение не подходит", use_inner_text=True)
-        toggle.click()
         expect(
             reasons.get_by_role("heading", name="Почему помещение не подходит")
         ).to_be_visible()
@@ -209,11 +206,11 @@ with sync_playwright() as pw:
     expect(ranked_rows.first).to_contain_text("/ 100")
     low_power = ranked_rows.filter(has_text=f"Общий вариант Б {tag}")
     reasons = low_power.locator(".assessment-details")
-    expect(reasons).to_have_attribute("open", "")
+    expect(reasons).not_to_have_attribute("open", "")
     expect(reasons.locator("summary")).to_have_text(
-        "Скрыть детали", use_inner_text=True
+        "Посмотреть все ограничения", use_inner_text=True
     )
-    expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
+    expect(low_power.locator(".primary-limitations")).to_contain_text("12.00 кВт")
     low_power.get_by_text("Что повысит балл").click()
     expect(
         low_power.get_by_text("Снизьте расходы на 3 000 ₽ в месяц.", exact=False)
@@ -256,7 +253,7 @@ with sync_playwright() as pw:
     page.goto(base + f"/app/requests/{coffee}/compare")
     page.get_by_role("button", name="↻ Проверить / пересчитать выбранные").click()
     expect(page.locator("main")).to_contain_text("Не соответствует")
-    expect(page.locator("main")).to_contain_text("Превышение 3 000")
+    expect(page.locator("main")).to_contain_text("превышение составляет 3 000")
     expect(page.locator("main")).to_contain_text("677 операций в месяц")
     page.locator(
         '.report-parameters button[data-parameter="economics:monthly"]'
@@ -274,12 +271,14 @@ with sync_playwright() as pw:
     )
     uncertain = (
         page.locator(".recommendation-card")
-        .filter(has=page.locator(".assessment-show", has_text="Что нужно уточнить"))
+        .filter(
+            has=page.get_by_text("Технические требования требуют уточнения", exact=True)
+        )
         .first
     )
     for card, text in (
-        (passing, "Почему помещение подходит"),
-        (uncertain, "Что нужно уточнить"),
+        (passing, "Посмотреть все ограничения"),
+        (uncertain, "Посмотреть все ограничения"),
     ):
         reasons = card.locator(".assessment-details")
         expect(reasons).not_to_have_attribute("open", "")

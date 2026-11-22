@@ -191,6 +191,20 @@ def rounded(value):
     return value.quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
 
 
+def opening_costs(p, context):
+    if context is None:
+        return []
+    return [
+        ("Депозит", p.deposit),
+        ("Комиссия", p.commission),
+        ("Адаптация", context.adaptation),
+        ("Оборудование", context.equipment),
+        ("Первоначальные закупки", context.initial_stock),
+        ("Прочие затраты", context.other_once),
+        ("Кассовый резерв", context.cash_reserve),
+    ]
+
+
 def financial_metrics(req, p, context, costs):
     plan = req.financial_plan
     revenue, average, variable, fixed = (
@@ -221,19 +235,7 @@ def financial_metrics(req, p, context, costs):
         "scenarios": [],
         "max_drop": None,
     }
-    fit_costs = (
-        [
-            ("Депозит", p.deposit),
-            ("Комиссия", p.commission),
-            ("Адаптация", context.adaptation),
-            ("Оборудование", context.equipment),
-            ("Первоначальные закупки", context.initial_stock),
-            ("Прочие затраты", context.other_once),
-            ("Кассовый резерв", context.cash_reserve),
-        ]
-        if context is not None
-        else []
-    )
+    fit_costs = opening_costs(p, context)
     result["opening"] = sum((v for _, v in fit_costs if v is not None), Decimal(0))
     result["opening_missing"] = [label for label, value in fit_costs if value is None]
     result["opening_gap"] = (

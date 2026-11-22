@@ -80,9 +80,8 @@
               </td>
               <td role="cell">
                 <span class="ranking-mobile-label" aria-hidden="true">Статус и риски</span>
-                <span class="pill {{ card.status }}">
-                  {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
-                </span>
+                {% include "outcome_badges.html" with review=card.outcome only %}
+                {% include "primary_limitations.html" with review=card.outcome %}
                 {% include "assessment_details.html" %}
                 <div class="ranking-links">
                   <a href="{{ card.compare_url }}">Открыть проверку</a>
