@@ -232,7 +232,7 @@ def check_structured_requirement(req, observations):
             available.append((observation, value))
 
     try:
-        expected = normalize_value(kind, code, req.structured_value)
+        expected = normalize_value(kind, code, req.structured_value, requirement=True)
     except ValidationError:
         return requirement_result(
             req, "clarify", "Укажите точное условие в профиле.", sources

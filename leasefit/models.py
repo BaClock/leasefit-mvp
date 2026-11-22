@@ -160,6 +160,7 @@ class Requirement(models.Model):
                     self.characteristic.value_type,
                     self.characteristic.code,
                     self.structured_value,
+                    requirement=True,
                 )
                 return f"{self.name}: {value or 'не задано'}"
             if self.characteristic.value_type == "boolean":

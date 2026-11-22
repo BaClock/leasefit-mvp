@@ -12,15 +12,17 @@ from .management.commands.seed_novosibirsk import seed
 from .metric_forms import FinancialPlanForm
 from .models import Agency, Characteristic, Membership, Observation, Requirement
 from .operation_forms import WeeklyScheduleField
-from .operations import matches
+from .operations import GENERAL_ACCESS, matches
 from .regulations import regulatory_checklist
 from .services import (
+    active_requirements,
     check_requirement,
     current_evaluation,
     evaluate,
     issue_report,
     rank_premises,
 )
+from .tests import grouped_payload
 
 
 class ExpandedMVPTests(TestCase):
@@ -31,6 +33,98 @@ class ExpandedMVPTests(TestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+
+    def test_profile_yes_no_for_access_and_unloading_with_one_schedule(self):
+        url = reverse("profile", args=[self.coffee.pk])
+        page = self.client.get(url)
+        self.assertContains(page, "Нужен ли посетителям вход в помещение?")
+        self.assertContains(page, "Планируется ли разгрузка товаров?")
+        self.assertContains(page, "График работы бизнеса", count=1)
+        self.assertNotContains(page, "Работа в необходимое время")
+        payload = grouped_payload(
+            {
+                "title": self.coffee.title,
+                "city": self.coffee.city,
+                "business": self.coffee.business,
+                "version": self.coffee.version,
+                "creation_key": self.coffee.creation_key,
+                "visitor_entry_priority": "required",
+                "unloading_methods_priority": "required",
+            },
+            self.coffee,
+        )
+        self.assertRedirects(
+            self.client.post(url, payload), reverse("refine", args=[self.coffee.pk])
+        )
+        access = self.coffee.requirements.get(characteristic__code="visitor_entry")
+        unloading = self.coffee.requirements.get(
+            characteristic__code="unloading_methods"
+        )
+        self.assertEqual(access.structured_value, GENERAL_ACCESS["visitor_entry"])
+        self.assertEqual(
+            unloading.structured_value, GENERAL_ACCESS["unloading_methods"]
+        )
+        self.assertEqual(check_requirement(access, self.a)["status"], "pass")
+        self.assertEqual(check_requirement(unloading, self.a)["status"], "clarify")
+        Observation.objects.create(
+            premises=self.a,
+            characteristic=unloading.characteristic,
+            name=unloading.name,
+            structured_value=["none"],
+            author=self.user,
+            observed_on=date(2026, 11, 19),
+            status="confirmed",
+            confirmation="Учебные данные",
+            source="Учебные данные",
+        )
+        self.assertEqual(check_requirement(unloading, self.a)["status"], "blocker")
+        self.coffee.refresh_from_db()
+        payload.update(
+            version=self.coffee.version,
+            visitor_entry_priority="na",
+            unloading_methods_priority="na",
+        )
+        self.assertRedirects(
+            self.client.post(url, payload), reverse("refine", args=[self.coffee.pk])
+        )
+        self.assertFalse(
+            any(
+                row.pk in {access.pk, unloading.pk}
+                for row in active_requirements(self.coffee)
+            )
+        )
+
+    def test_template_yes_uses_general_requirements_and_no_ignores_old_details(self):
+        url = reverse("business_setup", args=[self.coffee.pk])
+        payload = {"action": "preview", "business_format": self.coffee.business_format}
+        result = self.client.post(
+            url, {**payload, "customers": "yes", "unloading": "yes"}
+        )
+        values = {value for _, value in result.context["choices"]}
+        self.assertIn("Любой доступ для посетителей", values)
+        self.assertIn("Любой доступный способ разгрузки", values)
+        result = self.client.post(
+            url,
+            {
+                **payload,
+                "customers": "no",
+                "unloading": "no",
+                "visitor_entry": "open",
+                "unloading_methods": "dock",
+            },
+        )
+        self.assertEqual(
+            [
+                label
+                for label, _ in result.context["choices"]
+                if label
+                in (
+                    "Как посетители должны попадать в помещение?",
+                    "Какой способ разгрузки необходим?",
+                )
+            ],
+            [],
+        )
 
     def test_template_preview_apply_and_repeat_preserve_manual_values(self):
         url = reverse("business_setup", args=[self.pickup.pk])

@@ -2,7 +2,14 @@ import re, uuid
 from io import BytesIO
 from PIL import Image
 from django import forms
-from .operations import CUSTOM_KINDS, STRUCTURED, normalize_value
+from .operations import (
+    ACCESS_QUESTIONS,
+    CUSTOM_KINDS,
+    GENERAL_ACCESS,
+    LEGACY_BY_REPLACEMENT,
+    STRUCTURED,
+    normalize_value,
+)
 from .operation_forms import structured_field
 from django.db.models import Q
 from django.forms import inlineformset_factory, BaseInlineFormSet
@@ -22,6 +29,12 @@ class VersionForm(forms.ModelForm):
 
 
 class RequestForm(VersionForm):
+    geography = forms.CharField(
+        label="В каких районах искать помещение?",
+        help_text="Например, Ленинский, Кировский. Перечислите районы через запятую.",
+        max_length=250,
+        required=False,
+    )
     business = forms.CharField(
         label="Формат бизнеса",
         max_length=160,
@@ -415,7 +428,10 @@ class RefinementForm(forms.Form):
         decimal_places=2,
     )
     geography = forms.CharField(
-        label="Какие районы или ориентиры подходят?", required=False, max_length=250
+        label="В каких районах искать помещение?",
+        help_text="Например, Ленинский, Кировский. Перечислите районы через запятую.",
+        required=False,
+        max_length=250,
     )
     area_min = forms.DecimalField(
         label="Площадь от, м²",
@@ -525,6 +541,7 @@ from django.db.models import Q
 from .characteristics import (
     STANDARD,
     GROUPS,
+    LEGACY_ACCESS,
     ALIASES,
     normalized,
     resolve_characteristic,
@@ -563,9 +580,29 @@ class GroupedRequirementsForm(forms.Form):
                 for r in rows
             )
         }
+        replaced = {
+            legacy: rows[0].priority
+            for code, rows in existing.items()
+            if code not in self.ambiguous_codes and rows[0].priority != "na"
+            for legacy in LEGACY_BY_REPLACEMENT.get(code, ())
+        }
         self.specs = [
             spec
             for spec in STANDARD
+            if (
+                spec["code"] not in LEGACY_ACCESS
+                or any(
+                    row.priority != "na"
+                    and (
+                        spec["code"] not in replaced
+                        or (
+                            row.priority == "required"
+                            and replaced[spec["code"]] != "required"
+                        )
+                    )
+                    for row in existing.get(spec["code"], ())
+                )
+            )
             if not (
                 self.is_bound
                 and spec["code"] + "_priority" not in self.data
@@ -582,8 +619,16 @@ class GroupedRequirementsForm(forms.Form):
                 continue
             r = existing.get(code, [None])[0]
             self.fields[code + "_priority"] = forms.ChoiceField(
-                label="Важность",
-                choices=IMPORTANCE,
+                label="Ответ" if code in GENERAL_ACCESS else "Важность",
+                choices=(
+                    [
+                        ("na", "Нет, не требуется"),
+                        ("required", "Да, обязательно"),
+                        ("desired", "Да, желательно"),
+                    ]
+                    if code in GENERAL_ACCESS
+                    else IMPORTANCE
+                ),
                 initial=r.priority if r else "na",
                 required=d["value_type"] not in STRUCTURED
                 and code not in {"delivery_approach", "storage_zone", "noise_limits"},
@@ -624,8 +669,17 @@ class GroupedRequirementsForm(forms.Form):
                 )
             elif d["value_type"] in STRUCTURED:
                 self.fields[code + "_structured"] = structured_field(
-                    d["value_type"], code, initial=r.structured_value if r else None
+                    d["value_type"],
+                    code,
+                    initial=r.structured_value if r else None,
+                    requirement=True,
                 )
+                if code in GENERAL_ACCESS:
+                    self.fields[code + "_structured"].label = (
+                        "Особый режим входа (если нужен)"
+                        if code == "visitor_entry"
+                        else "Способ разгрузки (если важен)"
+                    )
             else:
                 self.fields[code + "_text"] = forms.CharField(
                     label="Какое значение требуется?",
@@ -647,7 +701,11 @@ class GroupedRequirementsForm(forms.Form):
                 code = d["code"]
                 entries.append(
                     {
-                        "label": d["label"],
+                        "label": (
+                            "Прежняя отметка о времени работы"
+                            if code == "working_hours"
+                            else ACCESS_QUESTIONS.get(code, d["label"])
+                        ),
                         "code": code,
                         "primary": d["primary"],
                         "structured": d["value_type"] in STRUCTURED,
@@ -663,7 +721,7 @@ class GroupedRequirementsForm(forms.Form):
                 {
                     "title": title,
                     "intro": (
-                        "Укажите, каким образом посетители будут попадать в помещение, в какое время сможет работать бизнес и как будут организованы поставки."
+                        "Уточните, нужен ли вход посетителям или разгрузка, и задайте часы работы бизнеса."
                         if key == "access"
                         else ""
                     ),
@@ -695,7 +753,11 @@ class GroupedRequirementsForm(forms.Form):
                 self.add_error(
                     code + "_text", "Укажите нужное значение или выберите «Не важно»."
                 )
-            elif spec["value_type"] in STRUCTURED and not d.get(code + "_structured"):
+            elif (
+                spec["value_type"] in STRUCTURED
+                and code not in GENERAL_ACCESS
+                and not d.get(code + "_structured")
+            ):
                 self.add_error(
                     code + "_structured", "Выберите значение или отметьте «Не важно»."
                 )
@@ -745,8 +807,10 @@ class GroupedRequirementsForm(forms.Form):
                 values["expected"] = self.cleaned_data.get(code + "_expected") != "no"
             elif spec["value_type"] in STRUCTURED:
                 value = self.cleaned_data.get(code + "_structured")
+                if priority != "na" and not value:
+                    value = GENERAL_ACCESS.get(code)
                 values["structured_value"] = (
-                    normalize_value(spec["value_type"], code, value)
+                    normalize_value(spec["value_type"], code, value, requirement=True)
                     if value
                     else old.structured_value if old else None
                 )

@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from .operations import GENERAL_ACCESS
+
 TEMPLATE_VERSION = "1"
 
 
@@ -140,11 +142,16 @@ def recommendations(format_code, answers):
     }.items():
         if answers.get(question) == "yes":
             proposed.update(dict.fromkeys(additions, True))
-    for code in ("visitor_entry", "operating_schedule", "unloading_methods"):
-        if answers.get(code):
-            proposed[code] = answers[code]
-    if format_code.startswith("pickup.") and answers.get("unloading") == "yes":
-        proposed.setdefault("unloading_methods", ["dock"])
+    for question, code in (
+        ("customers", "visitor_entry"),
+        ("unloading", "unloading_methods"),
+    ):
+        if answers.get(question) != "no":
+            value = answers.get(code)
+            if value or answers.get(question) == "yes":
+                proposed[code] = value or GENERAL_ACCESS[code]
+    if answers.get("operating_schedule"):
+        proposed["operating_schedule"] = answers["operating_schedule"]
     if answers.get("extraction") == "no":
         proposed.pop("separate_exhaust", None)
     return proposed

@@ -12,6 +12,7 @@ UNLOADING = {
     "yard": "Через вход со двора",
     "service": "Через отдельный служебный вход",
     "dock": "Через специализированную разгрузочную зону",
+    "none": "Разгрузка невозможна",
 }
 VEHICLES = {
     "car": "Легковой автомобиль",
@@ -28,6 +29,16 @@ DAY = 24 * 60
 WEEK = 7 * DAY
 STRUCTURED = {"enum", "multi_select", "time_schedule"}
 CUSTOM_KINDS = {"number", "boolean", "text"}
+GENERAL_ACCESS = {"visitor_entry": "any_visitor", "unloading_methods": ["any_method"]}
+ACCESS_QUESTIONS = {
+    "visitor_entry": "Нужен ли посетителям вход в помещение?",
+    "unloading_methods": "Планируется ли разгрузка товаров?",
+    "operating_schedule": "График работы бизнеса",
+}
+GENERAL_ACCESS_LABELS = {
+    "visitor_entry": "Любой доступ для посетителей",
+    "unloading_methods": "Любой доступный способ разгрузки",
+}
 LEGACY_BY_REPLACEMENT = {
     "visitor_entry": {"visitor_access"},
     "operating_schedule": {"working_hours", "access_24h"},
@@ -35,7 +46,9 @@ LEGACY_BY_REPLACEMENT = {
 }
 
 
-def normalize_value(kind, code, value):
+def normalize_value(kind, code, value, *, requirement=False):
+    if requirement and code in GENERAL_ACCESS and value == GENERAL_ACCESS[code]:
+        return value
     if (
         kind == "enum"
         and isinstance(value, str)
@@ -51,7 +64,9 @@ def normalize_value(kind, code, value):
             for item in value
         )
     ):
-        return sorted(set(value))
+        options = sorted(set(value))
+        if "none" not in options or (options == ["none"] and not requirement):
+            return options
     if kind == "time_schedule" and isinstance(value, dict):
         if value.get("mode") == "always":
             return {"mode": "always"}
@@ -97,6 +112,10 @@ def weekly_coverage(schedule):
 
 
 def matches(kind, expected, actual):
+    if kind == "enum" and expected == GENERAL_ACCESS["visitor_entry"]:
+        return actual in {"open", "controlled"}
+    if kind == "multi_select" and expected == GENERAL_ACCESS["unloading_methods"]:
+        return bool(actual) and actual != ["none"]
     if kind == "time_schedule":
         coverage = weekly_coverage(actual)
         return all(
@@ -108,13 +127,15 @@ def matches(kind, expected, actual):
     return expected == actual
 
 
-def value_label(kind, code, value):
+def value_label(kind, code, value, *, requirement=False):
     if value is None:
         return ""
     try:
-        value = normalize_value(kind, code, value)
+        value = normalize_value(kind, code, value, requirement=requirement)
     except ValidationError:
         return ""
+    if requirement and code in GENERAL_ACCESS and value == GENERAL_ACCESS[code]:
+        return GENERAL_ACCESS_LABELS[code]
     if kind == "time_schedule":
         if value["mode"] == "always":
             return "Круглосуточно"

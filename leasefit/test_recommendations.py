@@ -84,6 +84,48 @@ class RecommendationTests(TestCase):
         self.assertContains(response, "Нормативные вопросы к проверке")
         self.assertEqual(before, state())
 
+    def test_saved_districts_limit_catalog_and_preserve_selected_premises(self):
+        self.b.district = "Центральный район"
+        self.b.save(update_fields=["district"])
+        self.client.post(
+            attach_url(self.coffee, self.c), attach_data(self.coffee, self.c)
+        )
+        refine = reverse("refine", args=[self.coffee.pk])
+        response = self.client.post(
+            refine,
+            {
+                "version": self.coffee.version,
+                "geography": "  ленинский район  ",
+                "area_priority": "desired",
+                "water_priority": "desired",
+                "ventilation_priority": "desired",
+            },
+        )
+        self.assertRedirects(response, self.url)
+        response = self.client.get(self.url)
+        self.assertEqual([card["p"] for card in page_cards(response)], [self.a])
+        self.assertEqual([card["p"] for card in response.context["cards"]], [self.c])
+        self.assertContains(response, "Районы запроса: Ленинский")
+        self.coffee.geography = "р-н ЛЕНИНСКИЙ; Центральный, Несуществующий"
+        self.coffee.save(update_fields=["geography"])
+        response = self.client.get(self.url)
+        self.assertEqual({card["p"] for card in page_cards(response)}, {self.a, self.b})
+        self.assertContains(response, "Несуществующий")
+        self.assertEqual(
+            [
+                card["p"]
+                for card in page_cards(
+                    self.client.get(self.url, {"district": self.b.district})
+                )
+            ],
+            [self.b],
+        )
+        self.coffee.geography = "Несуществующий"
+        self.coffee.save(update_fields=["geography"])
+        response = self.client.get(self.url)
+        self.assertEqual(page_cards(response), [])
+        self.assertContains(response, "В каталоге нет районов с указанными названиями")
+
     def test_status_groups_keep_unknowns_ahead_of_confirmed_blockers(self):
         unknown = Premises.objects.create(agency=self.agency, label="Без подтверждений")
         char = Characteristic.objects.get(code="separate_exhaust")

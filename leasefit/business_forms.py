@@ -2,7 +2,10 @@ from django import forms
 
 from .business import FORMAT_CHOICES, QUESTION_GROUPS, QUESTIONS
 from .operation_forms import structured_field
-from .operations import normalize_value
+from .operations import ACCESS_QUESTIONS, normalize_value
+
+ACCESS_ANSWERS = {"customers": "visitor_entry", "unloading": "unloading_methods"}
+YES_NO = [("", "Пока неизвестно"), ("yes", "Да"), ("no", "Нет")]
 
 
 class BusinessSetupForm(forms.Form):
@@ -24,10 +27,12 @@ class BusinessSetupForm(forms.Form):
         for category, keys in QUESTION_GROUPS.items():
             self.questions[category] = []
             for key in keys:
+                if key in ACCESS_ANSWERS:
+                    continue
                 self.fields[key] = forms.ChoiceField(
                     label=QUESTIONS[key],
                     required=False,
-                    choices=[("", "Пока неизвестно"), ("yes", "Да"), ("no", "Нет")],
+                    choices=YES_NO,
                 )
                 self.questions[category].append(self[key])
         self.fields["equipment_notes"] = forms.CharField(
@@ -39,27 +44,49 @@ class BusinessSetupForm(forms.Form):
             "time_schedule", "operating_schedule"
         )
         self.fields["unloading_methods"] = structured_field(
-            "multi_select", "unloading_methods"
+            "multi_select", "unloading_methods", requirement=True
         )
-        self.fields["unloading_methods"].label = "Нужные способы разгрузки"
+        self.fields["visitor_entry"].label = "Особый режим входа (если нужен)"
+        self.fields["unloading_methods"].label = "Способ разгрузки (если важен)"
+        self.fields["operating_schedule"].label = ACCESS_QUESTIONS["operating_schedule"]
+        for answer, detail in ACCESS_ANSWERS.items():
+            self.fields[answer] = forms.ChoiceField(
+                label=ACCESS_QUESTIONS[detail], choices=YES_NO, required=False
+            )
+            if detail in self.initial and answer not in self.initial:
+                self.initial[answer] = "yes"
         self.operating_questions = [
             self[key]
-            for key in ("visitor_entry", "operating_schedule", "unloading_methods")
+            for key in (
+                "customers",
+                "visitor_entry",
+                "unloading",
+                "unloading_methods",
+                "operating_schedule",
+            )
         ]
 
     def answers(self):
         category = self.cleaned_data["business_format"].split(".")[0]
         keys = (
             *QUESTION_GROUPS.get(category, ()),
-            "visitor_entry",
             "operating_schedule",
-            "unloading_methods",
         )
         if category == "food":
             keys += ("equipment_notes",)
         answers = {
             key: self.cleaned_data[key] for key in keys if self.cleaned_data.get(key)
         }
+        for answer, detail in ACCESS_ANSWERS.items():
+            value = self.cleaned_data[answer]
+            if answer not in self.data and self.cleaned_data[detail]:
+                value = "yes"
+            if value:
+                answers[answer] = value
+            else:
+                answers.pop(answer, None)
+            if value == "yes" and self.cleaned_data[detail]:
+                answers[detail] = self.cleaned_data[detail]
         if "unloading_methods" in answers:
             answers["unloading_methods"] = normalize_value(
                 "multi_select", "unloading_methods", answers["unloading_methods"]

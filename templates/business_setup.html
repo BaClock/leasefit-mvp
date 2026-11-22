@@ -19,7 +19,7 @@
         {% endfor %}
         <div class="form-grid">
           {% for field in form.operating_questions %}
-            <div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}</div>
+            <div class="field"{% if field.name == "visitor_entry" %} data-business-option="customers"{% elif field.name == "unloading_methods" %} data-business-option="unloading"{% endif %}>{{ field.label_tag }}{{ field }}{{ field.errors }}</div>
           {% endfor %}
         </div>
         <button name="action" value="preview">Посмотреть рекомендации</button>

@@ -28,6 +28,12 @@
       {% if city_excluded %}
         <p class="hint">За пределами города «{{ req.city }}» по подтверждённым данным · {{ city_excluded }}. Объекты с неизвестным городом остаются в подборе.</p>
       {% endif %}
+      {% if profile_districts %}
+        <p>Районы запроса: {{ profile_districts|join:", " }}. <a href="{% url 'refine' req.pk %}">Изменить районы</a></p>
+      {% endif %}
+      {% if unmatched_districts %}
+        <p>В каталоге нет районов с указанными названиями: {{ unmatched_districts|join:", " }}. <a href="{% url 'refine' req.pk %}">Уточнить районы</a></p>
+      {% endif %}
       <details class="recommendation-controls" {% if filter_query or recommendation_filters.errors %}open{% endif %}>
         <summary>Фильтры и сортировка</summary>
         <form method="get" action="{% url 'objects' req.pk %}#recommendations">
@@ -38,7 +44,7 @@
           </div>
         </form>
       </details>
-      {% if not recommendation_filters.errors and not recommendation_counts.pass %}
+      {% if not recommendation_filters.errors and not recommendation_counts.pass and not unmatched_districts %}
         <p>Подтверждённых подходящих помещений пока не найдено.</p>
       {% endif %}
       {% if recommendation_groups.pass %}
@@ -53,7 +59,7 @@
           {% include "recommendation_group.html" with title="" items=recommendation_groups.blocker %}
         </details>
       {% endif %}
-      {% if not recommendation_page.paginator.count and not recommendation_filters.errors %}
+      {% if not recommendation_page.paginator.count and not recommendation_filters.errors and not unmatched_districts %}
         <p>По текущим фильтрам вариантов нет.</p>
       {% endif %}
       {% if recommendation_page.has_other_pages %}

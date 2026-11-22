@@ -27,9 +27,10 @@ from .regulations import (
     STATUS as REGULATORY_STATUS,
     regulatory_checklist,
 )
-from .operations import STRUCTURED, value_label
+from .operations import GENERAL_ACCESS, LEGACY_BY_REPLACEMENT, STRUCTURED, value_label
 from .recommendations import (
     for_request_city,
+    profile_districts,
     recommend_catalog_premises,
     technical_filters,
 )
@@ -320,17 +321,29 @@ def objects(request, pk):
     selected_ids = {card["p"].pk for card in cards}
     catalog_count = catalog.count()
     city_catalog = for_request_city(catalog, obj)
-    districts = (
+    districts = list(
         city_catalog.exclude(district="")
         .order_by("district")
         .values_list("district", flat=True)
         .distinct()
     )
-    form = RecommendationFilterForm(request.GET, districts=list(districts))
+    district_names, unmatched_districts = (
+        profile_districts(obj.geography, districts)
+        if obj.geography.strip()
+        else (None, [])
+    )
+    form = RecommendationFilterForm(
+        request.GET, districts=districts if district_names is None else district_names
+    )
     recommendations, counts = [], {}
     if catalog_count and ranking_ready and form.is_valid():
         recommendations, counts = recommend_catalog_premises(
-            obj, catalog, requirements, form.cleaned_data, selected_ids
+            obj,
+            catalog,
+            requirements,
+            form.cleaned_data,
+            selected_ids,
+            district_names=district_names,
         )
     page = Paginator(recommendations, 20).get_page(request.GET.get("page"))
     groups = {
@@ -354,6 +367,8 @@ def objects(request, pk):
             "recommendation_page": page,
             "recommendation_filters": form,
             "catalog_count": catalog_count,
+            "profile_districts": district_names,
+            "unmatched_districts": unmatched_districts,
             "city_excluded": (
                 catalog_count - city_catalog.count()
                 if obj.city and catalog_count
@@ -1483,10 +1498,10 @@ def apply_business_template(request, pk):
     req = load_request(request, pk, write=True, lock=True)
     templates = {
         "Кофейня": ["water_supply", "sewerage", "ventilation", "separate_exhaust"],
-        "ПВЗ": ["separate_entrance", "loading_access", "visitor_access"],
-        "Магазин": ["display_windows", "loading_access", "visitor_access"],
+        "ПВЗ": ["separate_entrance", "unloading_methods", "visitor_entry"],
+        "Магазин": ["display_windows", "unloading_methods", "visitor_entry"],
         "Салон красоты": ["water_supply", "sewerage", "ventilation"],
-        "Офис": ["visitor_access", "heating", "air_conditioning"],
+        "Офис": ["visitor_entry", "heating", "air_conditioning"],
     }
     business = request.POST.get("business")
     if (
@@ -1501,8 +1516,10 @@ def apply_business_template(request, pk):
         return redirect("profile", pk=pk)
     changed = False
     for code in templates[business]:
-        char = Characteristic.objects.get(code=code)
-        if not req.requirements.filter(characteristic=char).exists():
+        if not req.requirements.filter(
+            characteristic__code__in={code, *LEGACY_BY_REPLACEMENT.get(code, ())}
+        ).exists():
+            char = Characteristic.objects.get(code=code)
             Requirement.objects.create(
                 request=req,
                 characteristic=char,
@@ -1510,6 +1527,7 @@ def apply_business_template(request, pk):
                 unit=char.unit,
                 operator="eq",
                 priority="desired",
+                structured_value=GENERAL_ACCESS.get(code),
                 origin="legacy-template",
             )
             changed = True
@@ -1634,7 +1652,7 @@ def business_setup(request, pk):
                 (
                     char.label,
                     (
-                        value_label(char.value_type, char.code, value)
+                        value_label(char.value_type, char.code, value, requirement=True)
                         if char.value_type in STRUCTURED
                         else "Наличие"
                     ),

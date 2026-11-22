@@ -90,7 +90,7 @@ class OperationOptions(forms.CheckboxSelectMultiple):
         return [item for item in (values or []) if item != ""]
 
 
-def structured_field(kind, code, *, required=False, initial=None):
+def structured_field(kind, code, *, required=False, initial=None, requirement=False):
     if kind == "time_schedule":
         return WeeklyScheduleField(
             label="График",
@@ -98,6 +98,8 @@ def structured_field(kind, code, *, required=False, initial=None):
             initial=initial,
         )
     choices = list(ACCESS_CHOICES[code].items())
+    if requirement and code == "unloading_methods":
+        choices = [(key, label) for key, label in choices if key != "none"]
     if kind == "enum":
         return forms.ChoiceField(
             label="Режим доступа",

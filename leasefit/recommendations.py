@@ -1,5 +1,6 @@
 """Read-only, agency-scoped shortlist preview."""
 
+import re
 from collections import Counter
 from decimal import Decimal
 
@@ -46,6 +47,24 @@ def for_request_city(catalog, req):
     return catalog
 
 
+def district_key(name):
+    name = " ".join(name.casefold().replace("ё", "е").split())
+    return re.sub(r"^(?:район|р-н)\s+|\s+(?:район|р-н)$", "", name)
+
+
+def profile_districts(geography, available):
+    requested = {
+        district_key(part): part.strip()
+        for part in re.split(r"[,;/\n]+", geography)
+        if part.strip()
+    }
+    keys = {district_key(name) for name in available}
+    return (
+        [name for name in available if district_key(name) in requested],
+        [original for key, original in requested.items() if key not in keys],
+    )
+
+
 def technical_filters(filters):
     selected = {
         code: filters[field]
@@ -73,12 +92,25 @@ def technical_filters(filters):
     ]
 
 
-def recommend_catalog_premises(req, catalog, requirements, filters, selected_ids):
+def recommend_catalog_premises(
+    req, catalog, requirements, filters, selected_ids, *, district_names=None
+):
     """Evaluate all eligible candidates before sorting or paginating."""
     counts = Counter({status: 0 for status in STATUS_ORDER})
     if not any(row.priority == "required" for row in requirements):
         return [], counts
     candidates = for_request_city(catalog, req)
+    if req.geography.strip():
+        if district_names is None:
+            district_names, _ = profile_districts(
+                req.geography,
+                list(
+                    candidates.exclude(district="")
+                    .values_list("district", flat=True)
+                    .distinct()
+                ),
+            )
+        candidates = candidates.filter(district__in=district_names)
     for field, lookup in (
         ("q", "label__icontains"),
         ("premises_type", "premises_type"),

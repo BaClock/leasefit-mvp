@@ -151,8 +151,12 @@ document.addEventListener("DOMContentLoaded", () => {
       for (const questions of form.querySelectorAll("[data-business-category]")) {
         questions.hidden = format.value.split(".")[0] !== questions.dataset.businessCategory;
       }
+      for (const field of form.querySelectorAll("[data-business-option]")) {
+        const answer = form.elements.namedItem(field.dataset.businessOption);
+        field.hidden = answer.value !== "yes" && !field.querySelector(".errorlist");
+      }
     };
-    format.addEventListener("change", sync);
+    form.addEventListener("change", sync);
     sync();
   }
 });
