@@ -1,0 +1,25 @@
+<div data-district-picker data-district-city="{{ widget.city }}">
+  <p class="hint" data-district-unavailable {% if widget.supported %}hidden{% endif %}>Выбор районов доступен для Новосибирска.</p>
+  <fieldset data-district-field {% if not widget.supported %}hidden disabled{% endif %}>
+    <legend id="{{ widget.attrs.id }}-label">{{ widget.question }}</legend>
+    <input type="hidden" name="{{ widget.name }}-present" value="1">
+    <div class="district-control">
+      <div class="district-tags" data-district-tags aria-live="polite">
+        {% for group, options, index in widget.optgroups %}
+          {% for option in options %}{% if option.selected %}<span class="district-tag">{{ option.label }}</span>{% endif %}{% endfor %}
+        {% endfor %}
+      </div>
+      <details class="district-menu">
+        <summary aria-labelledby="{{ widget.attrs.id }}-toggle {{ widget.attrs.id }}-label"><span id="{{ widget.attrs.id }}-toggle">Выбрать районы</span></summary>
+        <div class="district-options">
+          {% for group, options, index in widget.optgroups %}
+            {% for option in options %}
+              <label data-district-name="{{ option.label }}">{% include "django/forms/widgets/input.html" with widget=option %}<span>{{ option.label }}</span></label>
+            {% endfor %}
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+  </fieldset>
+  {% if widget.legacy %}<p class="hint district-legacy">Ранее указано: {{ widget.legacy }}.{% if widget.supported %} После сохранения профиля подбор будет учитывать выбранные районы.{% endif %}</p>{% endif %}
+</div>

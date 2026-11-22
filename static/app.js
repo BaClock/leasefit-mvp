@@ -1,4 +1,65 @@
 document.addEventListener("DOMContentLoaded", () => {
+  for (const picker of document.querySelectorAll("[data-district-picker]")) {
+    const field = picker.querySelector("[data-district-field]");
+    const unavailable = picker.querySelector("[data-district-unavailable]");
+    const menu = picker.querySelector("details");
+    const summary = menu.querySelector("summary");
+    const tags = picker.querySelector("[data-district-tags]");
+    const [any, ...districts] = field.querySelectorAll('input[type="checkbox"]');
+    const city = picker.closest("form").elements.namedItem("city");
+    const cityKey = (name) => name.trim().toLowerCase().replaceAll("ё", "е");
+
+    const render = () => {
+      const selected = districts.filter((option) => option.checked);
+      any.checked = !selected.length;
+      tags.replaceChildren();
+      for (const choice of selected.length ? selected : [any]) {
+        const label = choice.closest("label").dataset.districtName;
+        const tag = document.createElement(choice === any ? "span" : "button");
+        tag.className = "district-tag";
+        tag.textContent = label;
+        if (choice !== any) {
+          tag.type = "button";
+          tag.setAttribute("aria-label", "Убрать район " + label);
+          const icon = document.createElement("span");
+          icon.setAttribute("aria-hidden", "true");
+          icon.textContent = "×";
+          tag.append(icon);
+          tag.addEventListener("click", () => {
+            choice.checked = false;
+            choice.dispatchEvent(new Event("input", { bubbles: true }));
+            render();
+            summary.focus();
+          });
+        }
+        tags.append(tag);
+      }
+    };
+
+    field.addEventListener("change", (event) => {
+      if (event.target === any && any.checked) {
+        for (const district of districts) district.checked = false;
+      }
+      render();
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menu.open) {
+        menu.open = false;
+        summary.focus();
+      }
+    });
+    if (city) {
+      const syncCity = () => {
+        const supported = cityKey(city.value) === cityKey(picker.dataset.districtCity);
+        field.hidden = field.disabled = !supported;
+        unavailable.hidden = supported;
+      };
+      city.addEventListener("input", syncCity);
+      syncCity();
+    }
+    render();
+  }
+
   const add = document.getElementById("add-requirement");
   if (add)
     add.addEventListener("click", () => {

@@ -16,6 +16,7 @@ from .operations import (
 )
 from .metrics import financial_metrics, evidence_summary
 from .regulations import regulatory_checklist
+from .geography import district_description
 
 RULES_VERSION = "p0-3.1"
 STATUS_ORDER = {"pass": 0, "clarify": 1, "blocker": 2}
@@ -766,7 +767,7 @@ def report_snapshot(req, objects, comment, parameters=None):
             "business": req.business_format_label,
             "budget": req.budget,
             "start_budget": req.start_budget,
-            "geography": req.geography,
+            "geography": district_description(req),
             "profile_version": req.version,
             "requirements": [
                 f"{r.get_priority_display()}: {r}" for r in active_requirements(req)

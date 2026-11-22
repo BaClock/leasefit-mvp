@@ -2,13 +2,18 @@
 <article class="fact-card recommendation-card">
   <header class="recommendation-card-head">
     <h4>{{ card.p.label }}</h4>
-    <span class="pill {{ card.status }}">
-      {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
-    </span>
+    {% if card.catalog_group == "location" %}
+      <span class="pill clarify">Местоположение требует уточнения</span>
+    {% else %}
+      <span class="pill {{ card.status }}">
+        {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
+      </span>
+    {% endif %}
   </header>
   <p class="muted">
     {% if card.p.city %}{{ card.p.city }}{% endif %}{% if card.p.city and card.p.district %} · {% endif %}{% if card.p.district %}{{ card.p.district }}{% endif %}
-    {% if not card.p.location_confirmed or not card.p.city %}{% if card.p.city or card.p.district %} · {% endif %}Местоположение требует уточнения{% endif %}
+    {% if card.catalog_group == "location" %}{% if card.p.city or card.p.district %} · {% endif %}Техническая оценка: {% if card.status == "pass" %}соответствует{% elif card.status == "blocker" %}не соответствует{% else %}требует уточнения{% endif %}
+    {% elif not card.p.location_confirmed or not card.p.city %}{% if card.p.city or card.p.district %} · {% endif %}Местоположение требует уточнения{% endif %}
   </p>
   <p>{{ card.p.get_premises_type_display }}{% if card.p.area is not None %} · {{ card.p.area }} м²{% endif %}{% if card.p.floor %} · Этаж {{ card.p.floor }}{% endif %}{% if card.power %} · {{ card.power.value }} кВт{% if not card.power.confirmed %} (не подтверждено){% endif %}{% endif %}</p>
   <dl class="recommendation-summary recommendation-facts">

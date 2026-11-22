@@ -80,6 +80,8 @@ with sync_playwright() as pw:
         commercial.locator("summary").click()
         for name, value in {
             "label": f"{label} {tag}",
+            "city": "Новосибирск",
+            "district": "Ленинский",
             "area": 95,
             "rent": 60000,
             "operating": 8000,
@@ -90,6 +92,7 @@ with sync_playwright() as pw:
         }.items():
             page.locator("#id_" + name).fill(str(value))
         page.locator("#id_premises_type").select_option("retail")
+        page.locator("#id_location_confirmed").check()
         page.locator("#id_vat_mode").select_option("included")
         page.locator("#id_commercial_source").fill("Условное предложение собственника")
         page.locator("#id_commercial_date").fill(today)
@@ -191,9 +194,7 @@ with sync_playwright() as pw:
         toggle = reasons.locator("summary")
         expect(toggle).to_have_text("Скрыть детали", use_inner_text=True)
         toggle.click()
-        expect(toggle).to_have_text(
-            "Почему помещение не подходит", use_inner_text=True
-        )
+        expect(toggle).to_have_text("Почему помещение не подходит", use_inner_text=True)
         toggle.click()
         expect(
             reasons.get_by_role("heading", name="Почему помещение не подходит")
@@ -209,7 +210,9 @@ with sync_playwright() as pw:
     low_power = ranked_rows.filter(has_text=f"Общий вариант Б {tag}")
     reasons = low_power.locator(".assessment-details")
     expect(reasons).to_have_attribute("open", "")
-    expect(reasons.locator("summary")).to_have_text("Скрыть детали", use_inner_text=True)
+    expect(reasons.locator("summary")).to_have_text(
+        "Скрыть детали", use_inner_text=True
+    )
     expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
     low_power.get_by_text("Что повысит балл").click()
     expect(
@@ -266,8 +269,14 @@ with sync_playwright() as pw:
     event.value.save_as(str(original))
     original_hash = hashlib.sha256(original.read_bytes()).hexdigest()
     pickup = create_request("ПВЗ", 15)
-    passing = page.locator(".recommendation-card").filter(has_text=f"Общий вариант А {tag}")
-    uncertain = page.locator(".recommendation-card:has(.pill.clarify)").first
+    passing = page.locator(".recommendation-card").filter(
+        has_text=f"Общий вариант А {tag}"
+    )
+    uncertain = (
+        page.locator(".recommendation-card")
+        .filter(has=page.locator(".assessment-show", has_text="Что нужно уточнить"))
+        .first
+    )
     for card, text in (
         (passing, "Почему помещение подходит"),
         (uncertain, "Что нужно уточнить"),

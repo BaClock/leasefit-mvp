@@ -90,18 +90,8 @@ class RecommendationTests(TestCase):
         self.client.post(
             attach_url(self.coffee, self.c), attach_data(self.coffee, self.c)
         )
-        refine = reverse("refine", args=[self.coffee.pk])
-        response = self.client.post(
-            refine,
-            {
-                "version": self.coffee.version,
-                "geography": "  ленинский район  ",
-                "area_priority": "desired",
-                "water_priority": "desired",
-                "ventilation_priority": "desired",
-            },
-        )
-        self.assertRedirects(response, self.url)
+        self.coffee.geography = "  ленинский район  "
+        self.coffee.save(update_fields=["geography"])
         response = self.client.get(self.url)
         self.assertEqual([card["p"] for card in page_cards(response)], [self.a])
         self.assertEqual([card["p"] for card in response.context["cards"]], [self.c])
@@ -127,7 +117,13 @@ class RecommendationTests(TestCase):
         self.assertContains(response, "В каталоге нет районов с указанными названиями")
 
     def test_status_groups_keep_unknowns_ahead_of_confirmed_blockers(self):
-        unknown = Premises.objects.create(agency=self.agency, label="Без подтверждений")
+        unknown = Premises.objects.create(
+            agency=self.agency,
+            label="Без подтверждений",
+            city=self.coffee.city,
+            district="Ленинский",
+            location_confirmed=True,
+        )
         char = Characteristic.objects.get(code="separate_exhaust")
         Requirement.objects.create(
             request=self.coffee,
@@ -386,6 +382,9 @@ class RecommendationTests(TestCase):
             [
                 Premises(
                     agency=self.agency,
+                    city=self.coffee.city,
+                    district="Ленинский",
+                    location_confirmed=True,
                     label=f"Нагрузочный вариант {i:03}",
                     area=500 if i == 499 else 20 + i % 50,
                     rent=50000,

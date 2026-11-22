@@ -579,7 +579,7 @@ class CatalogMigrationTests(TransactionTestCase):
     """Exercise the actual historical 0004 schema, including binary payloads."""
 
     migrate_from = [("leasefit", "0004_clientrequest_report_parameters_and_more")]
-    migrate_to = [("leasefit", "0009_premises_geography")]
+    migrate_to = [("leasefit", "0010_clientrequest_districts")]
 
     def test_legacy_ids_values_history_and_files_survive(self):
         executor = MigrationExecutor(connection)
@@ -593,7 +593,10 @@ class CatalogMigrationTests(TransactionTestCase):
             user = U.objects.create(username="migration-owner")
             agency = A.objects.create(name="Migration agency")
             req = R.objects.create(
-                agency=agency, owner=user, title="Исторический запрос"
+                agency=agency,
+                owner=user,
+                title="Исторический запрос",
+                geography="Центральный, рядом с метро",
             )
             p = P.objects.create(
                 request=req,
@@ -651,6 +654,9 @@ class CatalogMigrationTests(TransactionTestCase):
             executor = MigrationExecutor(connection)
             executor.migrate(self.migrate_to)
         req_id, p_id, q_id, o_id, e_id, f_id, r_id = ids
+        migrated_request = ClientRequest.objects.get(pk=req_id)
+        self.assertEqual(migrated_request.geography, "Центральный, рядом с метро")
+        self.assertIsNone(migrated_request.districts)
         p = Premises.objects.get(pk=p_id)
         self.assertEqual(p.agency_id, agency.pk)
         self.assertEqual(p.version, 7)

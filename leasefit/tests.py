@@ -182,6 +182,10 @@ class AcceptanceTests(TestCase):
         self.assertEqual(self.client.get(url).context["cards"][1]["p"], unknown)
 
     def test_assessment_details_prioritize_blockers_in_both_lists(self):
+        self.p.city = self.req.city
+        self.p.district = "Ленинский"
+        self.p.location_confirmed = True
+        self.p.save(update_fields=["city", "district", "location_confirmed"])
         self.observe(value=12)
         for code in ("water_supply", "sewerage"):
             char = Characteristic.objects.get(code=code)
@@ -1004,7 +1008,7 @@ class AcceptanceTests(TestCase):
         data = {
             "version": 1,
             "budget": "65000",
-            "geography": "Левый берег",
+            "districts": ["Ленинский"],
             "area_min": "50",
             "area_max": "80",
             "area_priority": "required",
@@ -1020,6 +1024,7 @@ class AcceptanceTests(TestCase):
         self.req.refresh_from_db()
         self.assertEqual(self.req.version, 2)
         self.assertEqual(self.req.budget, 65000)
+        self.assertEqual(self.req.districts, ["Ленинский"])
         self.assertEqual(self.req.requirements.get(name="Площадь").operator, "range")
         self.assertEqual(
             self.req.requirements.get(name="Отдельная вытяжка").priority, "na"

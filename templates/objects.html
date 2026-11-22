@@ -16,6 +16,7 @@
       <div><dt>Соответствуют</dt><dd>{{ recommendation_counts.pass|default:"0" }}</dd></div>
       <div><dt>Требуют уточнения</dt><dd>{{ recommendation_counts.clarify|default:"0" }}</dd></div>
       <div><dt>Есть блокеры</dt><dd>{{ recommendation_counts.blocker|default:"0" }}</dd></div>
+      {% if recommendation_counts.location %}<div><dt>Уточнить местоположение</dt><dd>{{ recommendation_counts.location }}</dd></div>{% endif %}
       <div><dt>Уже выбрано</dt><dd>{{ cards|length }}</dd></div>
     </dl>
     {% if not catalog_count %}
@@ -58,6 +59,9 @@
           <summary>Не соответствуют требованиям ({{ recommendation_counts.blocker }})</summary>
           {% include "recommendation_group.html" with title="" items=recommendation_groups.blocker %}
         </details>
+      {% endif %}
+      {% if recommendation_groups.location %}
+        {% include "recommendation_group.html" with title="Помещения с неподтверждённым местоположением" items=recommendation_groups.location %}
       {% endif %}
       {% if not recommendation_page.paginator.count and not recommendation_filters.errors and not unmatched_districts %}
         <p>По текущим фильтрам вариантов нет.</p>

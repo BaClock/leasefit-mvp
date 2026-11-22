@@ -1708,6 +1708,78 @@ button.secondary {
 .recommendation-card-actions {
   margin-top: 12px;
 }
+[data-district-field] legend {
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-weight: 600;
+}
+.district-control {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--section);
+  min-width: 0;
+}
+.district-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+.district-tag,
+button.district-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border: 1px solid #c5d5f3;
+  border-radius: 6px;
+  background: #edf3fd;
+  color: #21458e;
+  padding: 5px 9px;
+  font-size: 13px;
+}
+button.district-tag:hover {
+  background: #e0ebfc;
+}
+.district-menu {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.district-menu > summary {
+  min-height: 44px;
+  margin: 0;
+  padding: 11px 10px;
+  font-size: 14px;
+}
+.district-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 2px 8px;
+  padding: 8px 10px;
+  max-height: 50vh;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+.district-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px;
+  margin: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.district-options input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.district-legacy {
+  margin: 6px 0 0;
+}
 @media (max-width: 760px) {
   .recommendation-grid {
     grid-template-columns: minmax(0, 1fr);

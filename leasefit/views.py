@@ -19,6 +19,7 @@ from django.core import signing
 from django.core.paginator import Paginator
 from .business import FORMATS, TEMPLATE_VERSION, recommendations
 from .business_forms import BusinessSetupForm
+from .geography import district_key, requested_districts
 from .metric_forms import FinancialPlanForm
 from .metrics import METHODS, INSUFFICIENT
 from .regulations import (
@@ -30,7 +31,6 @@ from .regulations import (
 from .operations import GENERAL_ACCESS, LEGACY_BY_REPLACEMENT, STRUCTURED, value_label
 from .recommendations import (
     for_request_city,
-    profile_districts,
     recommend_catalog_premises,
     technical_filters,
 )
@@ -145,6 +145,7 @@ def profile(request, pk=None):
         if pk
         else ClientRequest(owner=request.user, agency=request.member.agency)
     )
+    original_districts = obj.districts
     form = RequestForm(request.POST or None, instance=obj)
     grouped = GroupedRequirementsForm(request.POST or None, request_obj=obj)
     custom_qs = (
@@ -198,7 +199,10 @@ def profile(request, pk=None):
             if not pk:
                 obj.creation_key = form.cleaned_data["creation_key"]
             if pk and (
-                form.has_changed() or grouped.has_changed() or formset.has_changed()
+                original_districts != obj.districts
+                or any(name != "districts" for name in form.changed_data)
+                or grouped.has_changed()
+                or formset.has_changed()
             ):
                 obj.version += 1
             obj.save()
@@ -327,13 +331,15 @@ def objects(request, pk):
         .values_list("district", flat=True)
         .distinct()
     )
-    district_names, unmatched_districts = (
-        profile_districts(obj.geography, districts)
-        if obj.geography.strip()
-        else (None, [])
-    )
+    district_names, unmatched_districts = requested_districts(obj, districts)
+    district_keys = {district_key(name) for name in district_names or ()}
     form = RecommendationFilterForm(
-        request.GET, districts=districts if district_names is None else district_names
+        request.GET,
+        districts=[
+            name
+            for name in districts
+            if district_names is None or district_key(name) in district_keys
+        ],
     )
     recommendations, counts = [], {}
     if catalog_count and ranking_ready and form.is_valid():
@@ -347,8 +353,8 @@ def objects(request, pk):
         )
     page = Paginator(recommendations, 20).get_page(request.GET.get("page"))
     groups = {
-        status: [card for card in page if card["status"] == status]
-        for status in STATUS_ORDER
+        group: [card for card in page if card["catalog_group"] == group]
+        for group in (*STATUS_ORDER, "location")
     }
     filter_params = request.GET.copy()
     filter_params.pop("page", None)
@@ -1700,8 +1706,8 @@ def refine(request, pk):
                 form,
             )
         d = form.cleaned_data
-        changed = obj.budget != d["budget"] or obj.geography != d["geography"]
-        obj.budget, obj.geography = d["budget"], d["geography"]
+        changed = obj.budget != d["budget"] or obj.districts != d["districts"]
+        obj.budget, obj.districts = d["budget"], d["districts"]
         specs = []
         if d.get("area_min") is not None or d.get("area_max") is not None:
             lo, hi = d.get("area_min"), d.get("area_max")

@@ -58,6 +58,7 @@ class ClientRequest(models.Model):
     business_answers = models.JSONField(default=dict, blank=True)
     financial_plan = models.JSONField(default=dict, blank=True)
     geography = models.CharField("Районы / ориентиры", max_length=250, blank=True)
+    districts = models.JSONField("Районы подбора", null=True, blank=True, default=None)
     budget = models.DecimalField("Лимит в месяц, ₽", **money)
     start_budget = models.DecimalField("Бюджет на старт, ₽", **money)
     stage = models.CharField(max_length=10, choices=STAGES, default="draft")
@@ -214,7 +215,7 @@ class Premises(models.Model):
     city = models.CharField("Город", max_length=120, blank=True)
     district = models.CharField("Район", max_length=120, blank=True)
     location_confirmed = models.BooleanField(
-        "Город подтверждён по адресу или документам", default=False
+        "Город и указанный район подтверждены по адресу или документам", default=False
     )
     floor = models.CharField("Этаж", max_length=40, blank=True)
     number = models.CharField("Номер помещения", max_length=60, blank=True)

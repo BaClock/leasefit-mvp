@@ -1,11 +1,11 @@
 """Read-only, agency-scoped shortlist preview."""
 
-import re
 from collections import Counter
 from decimal import Decimal
 
 from django.db.models import Prefetch, Q
 
+from .geography import district_key, districts_for_city, place_key, requested_districts
 from .models import Characteristic, Requirement
 from .services import (
     STATUS_ORDER,
@@ -47,24 +47,6 @@ def for_request_city(catalog, req):
     return catalog
 
 
-def district_key(name):
-    name = " ".join(name.casefold().replace("ё", "е").split())
-    return re.sub(r"^(?:район|р-н)\s+|\s+(?:район|р-н)$", "", name)
-
-
-def profile_districts(geography, available):
-    requested = {
-        district_key(part): part.strip()
-        for part in re.split(r"[,;/\n]+", geography)
-        if part.strip()
-    }
-    keys = {district_key(name) for name in available}
-    return (
-        [name for name in available if district_key(name) in requested],
-        [original for key, original in requested.items() if key not in keys],
-    )
-
-
 def technical_filters(filters):
     selected = {
         code: filters[field]
@@ -96,21 +78,23 @@ def recommend_catalog_premises(
     req, catalog, requirements, filters, selected_ids, *, district_names=None
 ):
     """Evaluate all eligible candidates before sorting or paginating."""
-    counts = Counter({status: 0 for status in STATUS_ORDER})
+    counts = Counter({group: 0 for group in (*STATUS_ORDER, "location")})
     if not any(row.priority == "required" for row in requirements):
         return [], counts
     candidates = for_request_city(catalog, req)
-    if req.geography.strip():
-        if district_names is None:
-            district_names, _ = profile_districts(
-                req.geography,
-                list(
-                    candidates.exclude(district="")
-                    .values_list("district", flat=True)
-                    .distinct()
-                ),
+    city_key = place_key(req.city)
+    registered = districts_for_city(req.city)
+    known_districts = {district_key(name) for name in registered}
+    if district_names is None:
+        available = ()
+        if not registered and req.geography.strip():
+            available = (
+                candidates.exclude(district="")
+                .values_list("district", flat=True)
+                .distinct()
             )
-        candidates = candidates.filter(district__in=district_names)
+        district_names, _ = requested_districts(req, available)
+    required_districts = {district_key(name) for name in district_names or ()}
     for field, lookup in (
         ("q", "label__icontains"),
         ("premises_type", "premises_type"),
@@ -136,6 +120,18 @@ def recommend_catalog_premises(
 
     results = []
     for obj in candidates:
+        district = district_key(obj.district)
+        location_uncertain = bool(registered) and (
+            district not in known_districts
+            or not obj.location_confirmed
+            or place_key(obj.city) != city_key
+        )
+        if (
+            district_names is not None
+            and district not in required_districts
+            and not location_uncertain
+        ):
+            continue
         observations = obj.ranking_observations
         if criteria and assess_requirements(obj, criteria, observations)[0] != "pass":
             continue
@@ -148,7 +144,8 @@ def recommend_catalog_premises(
             continue
         if filters.get("only_confirmed") and not card["evidence"]["confirmed"]:
             continue
-        counts[card["status"]] += 1
+        card["catalog_group"] = "location" if location_uncertain else card["status"]
+        counts[card["catalog_group"]] += 1
         if filters.get("status") and card["status"] != filters["status"]:
             continue
         card["selected"] = obj.pk in selected_ids
@@ -163,7 +160,7 @@ def recommend_catalog_premises(
 
 def sort_key(card, mode):
     obj = card["p"]
-    status = STATUS_ORDER[card["status"]]
+    status = (card["catalog_group"] == "location", STATUS_ORDER[card["status"]])
     score = score_order(card)
     if mode == "monthly":
         costs = card["economics"]

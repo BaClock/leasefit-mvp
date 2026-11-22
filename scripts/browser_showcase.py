@@ -69,9 +69,51 @@ def main():
         ).click()
         expect(selected).to_have_count(1)
         expect(first.get_by_role("button", name="Добавить к сравнению")).to_be_visible()
+        page.set_viewport_size({"width": 390, "height": 1000})
+        page.goto(f"{request_url}/profile")
+        picker = page.locator("[data-district-picker]")
+        field = picker.locator("[data-district-field]")
+        city = page.locator("#id_city")
+        city.fill("Бердск")
+        expect(field).to_be_hidden()
+        city.fill("Новосибирск")
+        expect(field).to_be_visible()
+        picker.locator("summary").click()
+        expect(picker.get_by_role("checkbox")).to_have_count(11)
+        any_district = picker.get_by_role("checkbox", name="Любой район")
+        expect(any_district).to_be_checked()
+        chosen = ("Центральный", "Октябрьский", "Заельцовский")
+        for district in chosen:
+            picker.get_by_role("checkbox", name=district, exact=True).check()
+        expect(any_district).not_to_be_checked()
+        picker.get_by_role("button", name="Убрать район Октябрьский").click()
+        expect(
+            picker.get_by_role("checkbox", name="Октябрьский", exact=True)
+        ).not_to_be_checked()
+        picker.get_by_role("checkbox", name="Октябрьский", exact=True).check()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.get_by_role("button", name="Далее: уточнить профиль").click()
+        for district in chosen:
+            expect(
+                picker.get_by_role("button", name=f"Убрать район {district}")
+            ).to_be_visible()
+        page.get_by_role("button", name="Далее: помещения").click()
+        expect(
+            page.get_by_text("Районы запроса: Заельцовский, Октябрьский, Центральный.")
+        ).to_be_visible()
+        expect(cards).to_have_count(6)
+        page.goto(f"{request_url}/profile")
+        picker.locator("summary").click()
+        any_district.check()
+        expect(picker.locator("[data-district-tags]")).to_have_text("Любой район")
+        page.get_by_role("button", name="Далее: уточнить профиль").click()
+        page.get_by_role("button", name="Далее: помещения").click()
+        expect(cards).to_have_count(20)
         assert not errors, errors
         browser.close()
-    print("PASS: каталог, подбор, сравнение, финансовый сценарий и PDF; 1440 и 390 px.")
+    print(
+        "PASS: каталог, районы, подбор, сравнение, финансовый сценарий и PDF; 1440 и 390 px."
+    )
 
 
 if __name__ == "__main__":

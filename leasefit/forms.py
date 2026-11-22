@@ -2,6 +2,7 @@ import re, uuid
 from io import BytesIO
 from PIL import Image
 from django import forms
+from .geography_forms import DistrictSelectionField
 from .operations import (
     ACCESS_QUESTIONS,
     CUSTOM_KINDS,
@@ -29,12 +30,7 @@ class VersionForm(forms.ModelForm):
 
 
 class RequestForm(VersionForm):
-    geography = forms.CharField(
-        label="В каких районах искать помещение?",
-        help_text="Например, Ленинский, Кировский. Перечислите районы через запятую.",
-        max_length=250,
-        required=False,
-    )
+    districts = DistrictSelectionField()
     business = forms.CharField(
         label="Формат бизнеса",
         max_length=160,
@@ -43,7 +39,24 @@ class RequestForm(VersionForm):
 
     class Meta:
         model = ClientRequest
-        fields = ["title", "city", "business", "geography", "budget", "start_budget"]
+        fields = ["title", "city", "business", "districts", "budget", "start_budget"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        city = (
+            self.data.get("city", self.instance.city)
+            if self.is_bound
+            else self.instance.city
+        )
+        self.fields["districts"].configure(self, self.instance, city)
+
+    def clean(self):
+        data = super().clean()
+        if "districts" in data and "city" in data:
+            data["districts"] = self.fields["districts"].clean_selection(
+                self, self.instance, data["city"]
+            )
+        return data
 
 
 class RequirementForm(forms.ModelForm):
@@ -427,12 +440,7 @@ class RefinementForm(forms.Form):
         max_digits=14,
         decimal_places=2,
     )
-    geography = forms.CharField(
-        label="В каких районах искать помещение?",
-        help_text="Например, Ленинский, Кировский. Перечислите районы через запятую.",
-        required=False,
-        max_length=250,
-    )
+    districts = DistrictSelectionField()
     area_min = forms.DecimalField(
         label="Площадь от, м²",
         required=False,
@@ -499,8 +507,8 @@ class RefinementForm(forms.Form):
         self.initial.update(
             version=request_obj.version,
             budget=request_obj.budget,
-            geography=request_obj.geography,
         )
+        self.fields["districts"].configure(self, request_obj, request_obj.city)
         codes = set(
             request_obj.requirements.values_list("characteristic__code", flat=True)
         )
@@ -528,6 +536,10 @@ class RefinementForm(forms.Form):
 
     def clean(self):
         d = super().clean()
+        if "districts" in d:
+            d["districts"] = self.fields["districts"].clean_selection(
+                self, self.request_obj, self.request_obj.city
+            )
         if (
             d.get("area_min") is not None
             and d.get("area_max") is not None
