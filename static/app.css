@@ -1464,23 +1464,16 @@ button.secondary {
 .ranking-mobile-label {
   display: none;
 }
-.ranking-risks,
 .ranking-improvements {
   margin-top: 8px;
   font-size: 13px;
 }
-.ranking-risks ul,
 .ranking-improvements ul {
   padding-left: 18px;
   margin: 10px 0 0;
 }
-.ranking-risks li + li,
 .ranking-improvements li + li {
   margin-top: 7px;
-}
-.ranking-risks li span {
-  display: block;
-  color: var(--muted);
 }
 .ranking-gain {
   display: inline-block;
@@ -1538,7 +1531,7 @@ button.secondary {
   }
   .ranking-table tbody th,
   .ranking-table tr:has(.ranking-improvements[open]) .ranking-score,
-  .ranking-table tr:has(.ranking-risks[open]) td:last-child {
+  .ranking-table td:has(.assessment-details[open]) {
     grid-column: 1 / -1;
   }
   .ranking-mobile-label {
@@ -1618,6 +1611,87 @@ button.secondary {
 .recommendation-card p,
 .recommendation-card ul {
   margin: 8px 0;
+}
+.assessment {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.assessment .assessment-budget {
+  margin: 0 0 8px;
+}
+.assessment .assessment-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.assessment-counts li {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.assessment-icon {
+  color: var(--assessment-color);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.assessment-details {
+  margin-top: 10px;
+  padding-top: 8px;
+}
+.assessment-details > summary {
+  margin-bottom: 0;
+  font-weight: 600;
+}
+.assessment-details[open] > summary .assessment-show,
+.assessment-details:not([open]) > summary .assessment-hide {
+  display: none;
+}
+.assessment-sections {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.assessment-sections h5 {
+  font-size: inherit;
+  margin: 0;
+}
+.assessment-title {
+  color: var(--red);
+}
+.assessment-section {
+  border: 1px solid var(--assessment-border, var(--border));
+  border-radius: 6px;
+  background: var(--assessment-bg, var(--section));
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+}
+.assessment-blocker {
+  --assessment-color: var(--red);
+  --assessment-border: #efb6bd;
+  --assessment-bg: #fff1f3;
+}
+.assessment-clarify {
+  --assessment-color: var(--amber);
+  --assessment-border: #ead09a;
+  --assessment-bg: #fff8e9;
+}
+.assessment-pass {
+  --assessment-color: var(--green);
+  --assessment-border: #b6deca;
+  --assessment-bg: #eff9f3;
+}
+.assessment-section h5 {
+  color: var(--assessment-color, var(--text));
+}
+.assessment-section ul {
+  padding-inline-start: 18px;
+  margin: 4px 0 0;
+}
+.assessment-section li + li {
+  margin-top: 4px;
 }
 .recommendation-controls,
 .recommendation-blockers,

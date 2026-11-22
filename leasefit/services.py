@@ -568,26 +568,13 @@ def ranking_observations(requirements, *, extra_codes=()):
 def assess_premises(req, p, requirements, observations, *, context):
     status, rows = assess_requirements(p, requirements, observations)
     costs = economics(p, req, context=context)
-    risks = [
-        {
-            "title": row["requirement"],
-            "label": row["label"],
-            "reason": row["reason"] if row["status"] == "clarify" else row["value"],
-        }
-        for row in rows
-        if row["status"] != "pass"
-    ]
+    reasons = defaultdict(list)
+    for row in rows:
+        reasons[row["status"]].append(row)
     budget_met = budget_result(p, costs)
     score, improvements = suitability_rating(rows, budget_met)
     budget_action = ""
     if req.budget is not None and budget_met is not True:
-        risks.append(
-            {
-                "title": "Месячный бюджет",
-                "label": costs["budget_label"],
-                "reason": ", ".join(costs["missing"]),
-            }
-        )
         if costs["complete"]:
             budget_action = f"Снизьте расходы на {money_text(costs['gap'])} в месяц."
         else:
@@ -604,8 +591,12 @@ def assess_premises(req, p, requirements, observations, *, context):
         "improvements": improvements,
         "budget_action": budget_action,
         "economics": costs,
-        "risks": risks,
         "rows": rows,
+        "blockers": reasons["blocker"],
+        "unclear": reasons["clarify"],
+        "unclear_count": len({row["characteristic_id"] for row in reasons["clarify"]}),
+        "matched": reasons["pass"],
+        "unmet_preferences": reasons["desired_fail"],
         "evidence": evidence_summary(rows),
     }
 

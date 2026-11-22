@@ -18,30 +18,8 @@
   </dl>
   {% if card.score is None %}<p class="muted">Недостаточно данных для расчёта рейтинга.</p>{% endif %}
   {% if not card.economics.complete %}<p class="muted">Полная сумма требует уточнения.</p>{% endif %}
-  {% if req.budget is not None %}<p>{{ card.economics.budget_label }}.</p>{% endif %}
   <p>Обязательные характеристики · подтверждено {{ card.evidence.confirmed }}, не подтверждено {{ card.evidence.unconfirmed }}, неизвестно {{ card.evidence.unknown }}.</p>
-  <details>
-    <summary>Посмотреть причины оценки</summary>
-    {% if card.matched %}
-      <h5>Почему помещение подходит</h5>
-      <ul>{% for row in card.matched %}<li>{{ row.requirement }} · {{ row.value }}</li>{% endfor %}</ul>
-    {% endif %}
-    {% if card.unclear or card.economics.missing %}
-      <h5>Что необходимо уточнить</h5>
-      <ul>
-        {% for row in card.unclear %}<li><strong>{{ row.requirement }}</strong> · {{ row.reason }} {{ row.question }}</li>{% endfor %}
-        {% for reason in card.economics.missing %}<li>{{ reason }}</li>{% endfor %}
-      </ul>
-    {% endif %}
-    {% if card.blockers %}
-      <h5>Критические несоответствия</h5>
-      <ul>{% for row in card.blockers %}<li><strong>{{ row.requirement }}</strong> · {{ row.value }}. {{ row.adjustment }}</li>{% endfor %}</ul>
-    {% endif %}
-    {% if card.unmet_preferences %}
-      <h5>Желательные условия не выполнены</h5>
-      <ul>{% for row in card.unmet_preferences %}<li>{{ row.requirement }} · {{ row.value }}</li>{% endfor %}</ul>
-    {% endif %}
-  </details>
+  {% include "assessment_details.html" %}
   <div class="actions recommendation-card-actions">
     {% if card.selected %}
       <a href="#selected-{{ card.p.pk }}">Уже в сравнении</a>

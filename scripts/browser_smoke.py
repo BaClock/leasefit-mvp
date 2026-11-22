@@ -183,8 +183,21 @@ with sync_playwright() as pw:
         page.locator(".recommendation-blockers > summary").click()
         card = page.locator(".recommendation-card").filter(has_text=f"{label} {tag}")
         expect(card).to_be_visible()
-        card.get_by_text("Посмотреть причины оценки").click()
-        expect(card).to_contain_text("Критические несоответствия")
+        reasons = card.locator(".assessment-details")
+        expect(reasons).to_have_attribute("open", "")
+        expect(
+            reasons.get_by_role("heading", name="Критические несоответствия")
+        ).to_be_visible()
+        toggle = reasons.locator("summary")
+        expect(toggle).to_have_text("Скрыть детали", use_inner_text=True)
+        toggle.click()
+        expect(toggle).to_have_text(
+            "Почему помещение не подходит", use_inner_text=True
+        )
+        toggle.click()
+        expect(
+            reasons.get_by_role("heading", name="Почему помещение не подходит")
+        ).to_be_visible()
         card.get_by_role("button", name="Добавить к сравнению").click()
         expect(card.get_by_text("Уже в сравнении", exact=True)).to_have_count(1)
     capture("recommendations")
@@ -194,7 +207,9 @@ with sync_playwright() as pw:
     expect(ranked_rows.first).to_contain_text("Не соответствует")
     expect(ranked_rows.first).to_contain_text("/ 100")
     low_power = ranked_rows.filter(has_text=f"Общий вариант Б {tag}")
-    low_power.get_by_text("Причины и риски").click()
+    reasons = low_power.locator(".assessment-details")
+    expect(reasons).to_have_attribute("open", "")
+    expect(reasons.locator("summary")).to_have_text("Скрыть детали", use_inner_text=True)
     expect(low_power.get_by_text("12.00 кВт", exact=False)).to_be_visible()
     low_power.get_by_text("Что повысит балл").click()
     expect(
@@ -251,6 +266,19 @@ with sync_playwright() as pw:
     event.value.save_as(str(original))
     original_hash = hashlib.sha256(original.read_bytes()).hexdigest()
     pickup = create_request("ПВЗ", 15)
+    passing = page.locator(".recommendation-card").filter(has_text=f"Общий вариант А {tag}")
+    uncertain = page.locator(".recommendation-card:has(.pill.clarify)").first
+    for card, text in (
+        (passing, "Почему помещение подходит"),
+        (uncertain, "Что нужно уточнить"),
+    ):
+        reasons = card.locator(".assessment-details")
+        expect(reasons).not_to_have_attribute("open", "")
+        toggle = reasons.locator("summary")
+        expect(toggle).to_have_text(text, use_inner_text=True)
+        toggle.click()
+        expect(toggle).to_have_text("Скрыть детали", use_inner_text=True)
+        toggle.click()
     page.get_by_role("link", name="Выбрать из каталога вручную").click()
     page.locator(f'input[name=objects][value="{ids[0]}"]').check()
     page.get_by_role("button", name="Добавить выбранные без копирования").click()

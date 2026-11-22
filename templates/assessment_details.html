@@ -1,0 +1,54 @@
+{% load leasefit_tags %}
+<div class="assessment">
+  {% if req.budget is not None %}<p class="assessment-budget">{{ card.economics.budget_label }}.</p>{% endif %}
+  {% with blockers=card.blockers|length unclear=card.unclear_count matched=card.matched|length %}
+    <ul class="assessment-counts" aria-label="Сводка причин оценки" role="list">
+      <li><span class="assessment-icon assessment-blocker" aria-hidden="true">×</span> {{ blockers }} {{ blockers|ru_plural:"критическое несоответствие,критических несоответствия,критических несоответствий" }}</li>
+      <li><span class="assessment-icon assessment-clarify" aria-hidden="true">!</span> {{ unclear }} {{ unclear|ru_plural:"параметр требует уточнения,параметра требуют уточнения,параметров требуют уточнения" }}</li>
+      <li><span class="assessment-icon assessment-pass" aria-hidden="true">✓</span> {{ matched }} {{ matched|ru_plural:"требование выполнено,требования выполнены,требований выполнено" }}</li>
+    </ul>
+  {% endwith %}
+  {% if card.blockers or card.unclear or card.matched or card.unmet_preferences or card.economics.missing %}
+    <details class="assessment-details"{% if card.blockers or card.status == "blocker" %} open{% endif %}>
+      <summary>
+        <span class="assessment-show">{% if card.blockers or card.status == "blocker" %}Почему помещение не подходит{% elif card.status == "pass" %}Почему помещение подходит{% else %}Что нужно уточнить{% endif %}</span>
+        <span class="assessment-hide">Скрыть детали</span>
+      </summary>
+      <div class="assessment-sections">
+        {% if card.blockers or card.status == "blocker" %}
+          <h5 class="assessment-title">Почему помещение не подходит</h5>
+        {% endif %}
+        {% if card.blockers %}
+          <section class="assessment-section assessment-blocker">
+            <h5>Критические несоответствия</h5>
+            <ul>{% for row in card.blockers %}<li><strong>{{ row.requirement }}</strong> · {{ row.value|default:row.reason }}{% if row.adjustment %}<div>{{ row.adjustment }}</div>{% endif %}</li>{% endfor %}</ul>
+          </section>
+        {% endif %}
+        {% if card.unclear %}
+          <section class="assessment-section assessment-clarify">
+            <h5>Что нужно уточнить</h5>
+            <ul>{% for row in card.unclear %}<li><strong>{{ row.requirement }}</strong> · {{ row.reason }} {{ row.question }}</li>{% endfor %}</ul>
+          </section>
+        {% endif %}
+        {% if card.matched %}
+          <section class="assessment-section assessment-pass">
+            <h5>Почему помещение подходит</h5>
+            <ul>{% for row in card.matched %}<li><strong>{{ row.requirement }}</strong>{% if row.value %} · {{ row.value }}{% endif %}</li>{% endfor %}</ul>
+          </section>
+        {% endif %}
+        {% if card.unmet_preferences %}
+          <section class="assessment-section">
+            <h5>Желательные условия не выполнены</h5>
+            <ul>{% for row in card.unmet_preferences %}<li><strong>{{ row.requirement }}</strong> · {{ row.value|default:row.reason }}</li>{% endfor %}</ul>
+          </section>
+        {% endif %}
+        {% if card.economics.missing %}
+          <section class="assessment-section">
+            <h5>Что уточнить по расходам</h5>
+            <ul>{% for reason in card.economics.missing %}<li>{{ reason }}</li>{% endfor %}</ul>
+          </section>
+        {% endif %}
+      </div>
+    </details>
+  {% endif %}
+</div>

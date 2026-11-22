@@ -157,7 +157,13 @@ class AcceptanceTests(TestCase):
                 (blocked.pk, "blocker", 40),
             ],
         )
-        self.assertContains(response, "Причины и риски (1)")
+        self.assertContains(
+            response, '<details class="assessment-details" open>', count=2
+        )
+        self.assertContains(response, "1 критическое несоответствие", count=2)
+        self.assertContains(response, "Почему помещение не подходит")
+        self.assertContains(response, "Почему помещение подходит")
+        self.assertContains(response, "Что нужно уточнить")
         self.assertContains(response, "Превышение 3 000 ₽")
         self.assertContains(response, "12.00 кВт")
         self.assertContains(response, "Выбрать из каталога")
@@ -174,6 +180,44 @@ class AcceptanceTests(TestCase):
         unknown.observations.update(superseded=True)
         self.observe(p=unknown)
         self.assertEqual(self.client.get(url).context["cards"][1]["p"], unknown)
+
+    def test_assessment_details_prioritize_blockers_in_both_lists(self):
+        self.observe(value=12)
+        for code in ("water_supply", "sewerage"):
+            char = Characteristic.objects.get(code=code)
+            Requirement.objects.create(
+                request=self.req, characteristic=char, name=char.label, operator="eq"
+            )
+            if code == "water_supply":
+                self.observe(
+                    characteristic=char, name=char.label, unit="", value=None, boolean=True
+                )
+        Requirement.objects.create(
+            request=self.req,
+            characteristic=Characteristic.objects.get(code="sewerage"),
+            name="Дополнительное условие о канализации",
+            operator="eq",
+            priority="desired",
+        )
+        response = self.client.get(
+            reverse("objects", args=[self.req.pk]), {"status": "blocker"}
+        )
+        self.assertContains(response, '<details class="recommendation-blockers" open>')
+        self.assertContains(response, "1 критическое несоответствие", count=2)
+        self.assertContains(response, "1 параметр требует уточнения", count=2)
+        self.assertContains(response, "1 требование выполнено", count=2)
+        groups = response.content.decode().split('<div class="assessment-sections">')[1:]
+        self.assertEqual(len(groups), 2)
+        for group in groups:
+            order = [
+                group.index(f"<h5>{label}</h5>")
+                for label in (
+                    "Критические несоответствия",
+                    "Что нужно уточнить",
+                    "Почему помещение подходит",
+                )
+            ]
+            self.assertEqual(order, sorted(order))
 
     def test_suitability_rating_counts_each_characteristic_once(self):
         rows = [

@@ -83,21 +83,7 @@
                 <span class="pill {{ card.status }}">
                   {% if card.status == "pass" %}Соответствует{% elif card.status == "blocker" %}Не соответствует{% else %}Требует уточнения{% endif %}
                 </span>
-                {% if card.risks %}
-                  <details class="ranking-risks">
-                    <summary>Причины и риски ({{ card.risks|length }})</summary>
-                    <ul>
-                      {% for risk in card.risks %}
-                        <li>
-                          <strong>{{ risk.title }}</strong>
-                          <span>{{ risk.label }}{% if risk.reason %} · {{ risk.reason }}{% endif %}</span>
-                        </li>
-                      {% endfor %}
-                    </ul>
-                  </details>
-                {% elif ranking_ready %}
-                  <span class="ranking-meta">Причин и рисков: 0</span>
-                {% endif %}
+                {% include "assessment_details.html" %}
                 <div class="ranking-links">
                   <a href="{{ card.compare_url }}">Открыть проверку</a>
                   <a href="{{ card.compare_url }}#analytics">Финансовый анализ</a>

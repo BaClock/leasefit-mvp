@@ -153,12 +153,6 @@ def recommend_catalog_premises(
             continue
         card["selected"] = obj.pk in selected_ids
         card["power"] = power_summary(observations)
-        card["matched"] = [row for row in card["rows"] if row["status"] == "pass"]
-        card["unclear"] = [row for row in card["rows"] if row["status"] == "clarify"]
-        card["blockers"] = [row for row in card["rows"] if row["status"] == "blocker"]
-        card["unmet_preferences"] = [
-            row for row in card["rows"] if row["status"] == "desired_fail"
-        ]
         card["has_monthly_values"] = any(
             value is not None for _, value in costs["monthly"][:-1]
         )

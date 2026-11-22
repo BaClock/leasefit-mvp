@@ -54,7 +54,7 @@
         {% include "recommendation_group.html" with title="Требуют уточнения" items=recommendation_groups.clarify %}
       {% endif %}
       {% if recommendation_groups.blocker %}
-        <details class="recommendation-blockers">
+        <details class="recommendation-blockers"{% if recommendation_filters.cleaned_data.status == "blocker" %} open{% endif %}>
           <summary>Не соответствуют требованиям ({{ recommendation_counts.blocker }})</summary>
           {% include "recommendation_group.html" with title="" items=recommendation_groups.blocker %}
         </details>
