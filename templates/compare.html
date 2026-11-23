@@ -5,7 +5,7 @@
   <div class="section-heading">
     <div>
       <h2>Проверка и сравнение</h2>
-      <p>Проверьте условия, сравните варианты и соберите клиентский отчёт.</p>
+      <p>Проверьте условия, сравните варианты и подготовьте PDF-отчёт.</p>
     </div>
     <span class="pill neutral">1–4 варианта</span>
   </div>
@@ -33,7 +33,7 @@
           <table class="compare">
             <thead>
               <tr>
-                <th>Параметр / состав отчёта</th>{% for c in columns %}<th>
+                <th>Параметр / состав подробного отчёта</th>{% for c in columns %}<th>
                   <a href="{% url 'premises' req.pk c.p.pk %}">{{ c.p.label }} ↗</a>
                   {% include "outcome_badges.html" with review=c.outcome checked=c.ev show_check=True only %}
                   {% include "primary_limitations.html" with review=c.outcome %}
@@ -100,46 +100,88 @@
 </div>
 {% else %}<p class="empty-small">Добавьте помещения и выберите до четырёх вариантов для проверки. Для сравнения нужны хотя бы два.</p>{% endif %}
 <section class="panel" id="report-builder">
-  <div class="eyebrow">КЛИЕНТСКАЯ ВЕРСИЯ</div>
-  <h2>Что добавить в отчёт?</h2>
-  <p>Обязательные требования, риски, итоги расходов и источники остаются в отчёте. Дополнительные параметры выберите ниже.</p>
-  <div class="report-parameters">
+  <h2>Подготовить PDF-отчёт</h2>
+  <div class="field">
+    <label for="{{ form.report_type.id_for_label }}">{{ form.report_type.label }}</label>
+    {{ form.report_type }}{{ form.report_type.errors }}
+    <p class="hint" data-report-description="client_short">Основные выводы, расходы, ограничения и рекомендации без лишних технических деталей.</p>
+    <p class="hint" data-report-description="broker_detailed">Полная проверка, финансовые расчёты, нормативные вопросы и источники данных.</p>
+  </div>
+  <div data-broker-report-options>
+    <h3>Дополнительные разделы и требования</h3>
+    <div class="report-parameters">
     {% for choice in parameter_choices %}
       <div class="parameter-item">
         <span>{{ choice.label }}</span>{% if can_edit %}<button name="action"
                                                                 value="parameter"
                                                                 class="parameter-button secondary"
                                                                 data-parameter="{{ choice.key }}">{% if choice.included %}✓ В отчёте · убрать{% else %}＋ Добавить в отчёт — параметр{% endif %}</button>{% else %}<span class="pill neutral">{% if choice.included %}В отчёте{% else %}Не выбран{% endif %}</span>{% endif %}</div>{% endfor %}</div>
+  </div>
     <input type="hidden" name="parameter" id="report-parameter" value="">
+    <div class="field">
+      <label for="{{ form.conclusion.id_for_label }}">{{ form.conclusion.label }}</label>
+      {{ form.conclusion }}{{ form.conclusion.errors }}
+      <p class="hint">Заключение риелтора отображается отдельно от результатов проверки помещений.</p>
+    </div>
     <div class="field">
       <label for="{{ form.comment.id_for_label }}">{{ form.comment.label }}</label>{{ form.comment }}{{ form.comment.errors }}
     </div>
-    <p class="hint">В PDF не попадут внутренние заметки и исходные вложения. Карта лидов пока доступна только как обозначенный будущий раздел.</p>
     <div class="actions">
-      <a class="button secondary" href="{% url 'objects' req.pk %}">← Назад к помещениям</a>{% if can_edit %}<button name="action" value="issue" {% if not preview %}disabled{% endif %}>Сформировать отчёт ↓</button>{% endif %}</div>{% if selected and not preview %}<p class="warning-text">Перед формированием отчёта пересчитайте выбранные помещения. Оценки отсутствуют или устарели.</p>{% endif %}</section>
+      <a class="button secondary" href="{% url 'objects' req.pk %}">← Назад к помещениям</a>
+      <button name="action" value="preview" formaction="#report-preview" class="secondary">Обновить предпросмотр</button>
+      {% if can_edit %}
+        <button name="action" value="issue" {% if not preview %}disabled{% endif %}>Сформировать отчёт ↓</button>
+      {% endif %}
+    </div>
+    {% if preview_error %}<p class="warning-text" id="report-preview">{{ preview_error }}</p>{% endif %}
+  </section>
   </form>
-  {% include "analytics.html" %}
   {% if preview %}
-    <section class="report-preview panel">
-      <div class="eyebrow">ПРЕДПРОСМОТР КЛИЕНТСКОЙ ВЕРСИИ</div>
-      <h2>{{ preview.request }}</h2>
-      <p>{{ preview.city }} · {{ preview.business }} · Лимит {{ preview.budget|rub }}</p>
+    <section class="report-preview panel" id="report-preview">
+      <div class="eyebrow">ПРЕДПРОСМОТР СОДЕРЖАНИЯ</div>
+      <h2>{{ preview.format_label }}</h2>
+      <p>{{ preview.request }} · {{ preview.city }} · {{ preview.business }}</p>
+      <p>Помещений в PDF — {{ preview.objects|length }} · Лимит на помещение — {{ preview.budget|rub }}/мес. · Лимит на открытие — {{ preview.start_budget|rub }}</p>
+      {% if preview.report_type == "client_short" %}
+        {% for headline in preview.client_content.summary.headlines %}<strong class="report-preview-headline">{{ headline }}</strong>{% endfor %}
+        <p>{{ preview.client_content.summary.recommendation }}</p>
+      {% endif %}
       <div class="request-grid">
-        {% for c in preview.objects %}
-          <article class="preview-tile">
-            <h3>{{ c.title }}</h3>
-            {% include "outcome_badges.html" with review=c.outcome only %}
-            {% if c.outcome.monthly.amount is not None %}<strong class="price">{{ c.outcome.monthly.amount|rub }}/мес.</strong>{% endif %}
-            <small>{{ c.rows|length }} параметров с причинами и источниками</small>
-          </article>
-        {% endfor %}
+        {% if preview.report_type == "client_short" %}
+          {% for c in preview.client_content.objects %}
+            <article class="preview-tile">
+              <h3>{{ c.title }}</h3>
+              <p>{{ c.verdict }}</p>
+              <small>{{ c.monthly_label }}</small>
+              <strong class="price">{{ c.monthly.amount|rub }}</strong>
+              <p>{{ c.difference }}</p>
+            </article>
+          {% endfor %}
+        {% else %}
+          {% for c in preview.objects %}
+            <article class="preview-tile">
+              <h3>{{ c.title }}</h3>
+              {% include "outcome_badges.html" with review=c.outcome only %}
+              <strong class="price">{{ c.outcome.monthly.amount|rub }}</strong>
+              {% if not c.outcome.monthly.complete %}<small>Известный подытог</small>{% endif %}
+              <small>{{ c.rows|length }} параметров с причинами и источниками</small>
+            </article>
+          {% endfor %}
+        {% endif %}
       </div>
+      <h3>Содержание PDF</h3>
+      <ul class="report-preview-sections">{% for section in preview.sections %}<li>{{ section }}</li>{% endfor %}</ul>
+      <p><strong>Заключение риелтора</strong> · {{ preview.broker_conclusion.label }}</p>
+      {% if preview.report_type == "client_short" %}
+        {% if preview.client_content.comment %}<p>{{ preview.client_content.comment|linebreaksbr }}</p>{% endif %}
+      {% elif preview.comment %}<p>{{ preview.comment|linebreaksbr }}</p>{% endif %}
     </section>
   {% endif %}
+  {% include "analytics.html" %}
   <section class="panel" id="report-versions">
     <h2>Сохранённые версии отчёта</h2>{% for report in versions %}<div class="version-row">
       <div>
-        <strong>Клиентский отчёт · v{{ report.version }}</strong>
+        <strong>{{ report.format_label|default:"Клиентский отчёт (архивный формат)" }} · v{{ report.version }}</strong>
         <small>{{ report.created_at|date:'d.m.Y H:i' }} · {{ report.author.get_full_name|default:report.author.username }}</small>
       </div>
       <a class="button secondary" href="{% url 'report_download' report.pk %}">↓ Скачать PDF</a>

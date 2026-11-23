@@ -16,6 +16,7 @@ from django.db.models import Q
 from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.contrib.auth.forms import SetPasswordForm
 from .models import *
+from .report_content import BROKER_CONCLUSIONS, CLIENT_SHORT, REPORT_FORMATS
 
 
 class VersionForm(forms.ModelForm):
@@ -409,9 +410,17 @@ class SelectionForm(forms.Form):
         widget=forms.CheckboxSelectMultiple,
     )
     comment = forms.CharField(
-        label="Клиентский комментарий",
+        label="Комментарий для отчёта",
         required=False,
         widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    report_type = forms.ChoiceField(
+        label="Формат отчёта", choices=REPORT_FORMATS.items(),
+        initial=CLIENT_SHORT, required=False,
+    )
+    conclusion = forms.ChoiceField(
+        label="Заключение риелтора", required=False,
+        choices=[("", "По результатам проверки"), *BROKER_CONCLUSIONS.items()],
     )
     creation_key = forms.UUIDField(
         widget=forms.HiddenInput, initial=uuid.uuid4, required=False
@@ -429,6 +438,9 @@ class SelectionForm(forms.Form):
                 f"Выберите от {self.minimum} до 4 вариантов одного запроса."
             )
         return q
+
+    def clean_report_type(self):
+        return self.cleaned_data["report_type"] or CLIENT_SHORT
 
 
 class RefinementForm(forms.Form):

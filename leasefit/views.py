@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, F, Q
+from django.db.models.fields.json import KeyTextTransform
 from django.http import Http404, HttpResponse, FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -960,7 +961,7 @@ def attachment_download(request, file_id):
 @transaction.atomic
 def compare(request, pk):
     write = request.method == "POST"
-    read_only_action = request.POST.get("action") == "show"
+    read_only_action = request.POST.get("action") in ("show", "preview")
     obj = load_request(
         request,
         pk,
@@ -980,15 +981,23 @@ def compare(request, pk):
     if not write:
         data = data.copy()
         data["comment"] = request.session.get(f"report-comment-{obj.pk}", "")
+        data.update(request.session.get(f"report-options-{obj.pk}", {}))
+        data.setdefault("report_type", CLIENT_SHORT)
     form = SelectionForm(data, request_obj=obj, minimum=1)
     selected, rows, columns, preview = [], [], [], None
+    preview_error = ""
     choices = report_parameter_choices(obj)
     action = request.POST.get(
         "action", "check" if request.path.endswith("/checks") else "preview"
     )
     valid = form.is_valid()
+    report_options = (
+        {name: form.cleaned_data[name] for name in ("report_type", "conclusion")}
+        if valid else {}
+    )
     if write and valid:
         request.session[f"report-comment-{obj.pk}"] = form.cleaned_data["comment"]
+        request.session[f"report-options-{obj.pk}"] = report_options
         selected = list(form.cleaned_data["objects"].order_by("id"))
         if action == "show":
             return comparison_redirect(obj, selected, differences)
@@ -1036,9 +1045,10 @@ def compare(request, pk):
                     request.user,
                     form.cleaned_data["creation_key"],
                     parameters=obj.report_parameters,
+                    **report_options,
                 )
                 messages.success(
-                    request, f"Клиентская версия {report.version} сохранена."
+                    request, f"Версия отчёта {report.version} сохранена."
                 )
                 return comparison_redirect(
                     obj, selected, differences, "report-versions"
@@ -1096,9 +1106,10 @@ def compare(request, pk):
                 selected,
                 form.cleaned_data["comment"],
                 parameters=obj.report_parameters,
+                **report_options,
             )
-        except ValueError:
-            pass  # Stale cards remain visible with a clear recalculate action.
+        except ValueError as exc:
+            preview_error = str(exc)
     return render(
         request,
         "compare.html",
@@ -1113,11 +1124,15 @@ def compare(request, pk):
             "regulatory_references": REFERENCES,
             "differences": differences,
             "preview": preview,
+            "preview_error": preview_error,
             "parameter_choices": [
                 {"key": key, "label": label, "included": key in obj.report_parameters}
                 for key, label in choices
             ],
-            "versions": obj.reports.defer("pdf", "snapshot").order_by("-version"),
+            "versions": obj.reports.defer("pdf", "snapshot")
+            .select_related("author")
+            .annotate(format_label=KeyTextTransform("format_label", "snapshot"))
+            .order_by("-version"),
         },
     )
 

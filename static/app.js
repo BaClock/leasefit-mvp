@@ -1,4 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const reportType = document.getElementById("id_report_type");
+  if (reportType) {
+    const form = reportType.form;
+    const preview = document.querySelector(".report-preview");
+    const updateFormat = () => {
+      form.dataset.reportType = reportType.value;
+      for (const description of form.querySelectorAll("[data-report-description]")) {
+        description.hidden = description.dataset.reportDescription !== reportType.value;
+      }
+      form.querySelector("[data-broker-report-options]").hidden =
+        reportType.value !== "broker_detailed";
+    };
+    for (const input of [reportType, form.elements.conclusion, form.elements.comment]) {
+      input.addEventListener("change", () => {
+        updateFormat();
+        if (preview) preview.hidden = true;
+      });
+    }
+    updateFormat();
+  }
+
   for (const picker of document.querySelectorAll("[data-district-picker]")) {
     const field = picker.querySelector("[data-district-field]");
     const unavailable = picker.querySelector("[data-district-unavailable]");

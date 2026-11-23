@@ -1,4 +1,4 @@
-"""Presentation-style client PDF. No live maps, outside requests or attachments."""
+"""PDF dispatch and detailed broker layout."""
 
 from io import BytesIO
 from pathlib import Path
@@ -17,6 +17,7 @@ from reportlab.platypus import (
     PageBreak,
 )
 from .services import money_text
+from .report_content import CLIENT_SHORT
 
 PAGE = (1080, 608)
 INK = colors.HexColor("#22324A")
@@ -27,7 +28,7 @@ PANEL = colors.HexColor("#F3F5FC")
 BORDER = colors.HexColor("#DDE3F0")
 
 
-def render_pdf(s):
+def register_fonts():
     if "LeaseFIT" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("LeaseFIT", settings.PDF_FONT))
         bold = Path(settings.PDF_FONT).with_name(
@@ -39,6 +40,18 @@ def render_pdf(s):
         pdfmetrics.registerFontFamily(
             "LeaseFIT", normal="LeaseFIT", bold="LeaseFITBold"
         )
+
+
+def render_pdf(snapshot):
+    if snapshot.get("report_type") == CLIENT_SHORT:
+        from .pdf_client import render_client_pdf
+
+        return render_client_pdf(snapshot)
+    return render_detailed_pdf(snapshot)
+
+
+def render_detailed_pdf(s):
+    register_fonts()
     styles = {
         "body": ParagraphStyle(
             "body",
@@ -169,12 +182,14 @@ def render_pdf(s):
     def money(v):
         return money_text(v) if v is not None else "Недостаточно данных"
 
-    title("Проверка помещений под ваш бизнес")
+    title(s.get("format_label", "Проверка помещений под ваш бизнес"))
     p(s["request"], "h2")
     p(f"{s['city']} · {s['business']} · {s['agency']} · {s['author']}")
     p(
         f"Месячный лимит: {money(s['budget'])}. Бюджет на старт: {money(s['start_budget'])}."
     )
+    if s.get("broker_conclusion"):
+        p("Заключение риелтора: " + s["broker_conclusion"]["label"])
     if s["comment"]:
         p("Комментарий риелтора: " + s["comment"])
     p("Короткий список вариантов", "h2")
@@ -440,7 +455,10 @@ def render_pdf(s):
         label.drawOn(c, 24, h - 70 - lh)
         c.setFillColor(MUTED)
         c.setFont("LeaseFITBold", 8)
-        c.drawString(24, h - 137, "КЛИЕНТСКИЙ ОТЧЁТ")
+        c.drawString(
+            24, h - 137,
+            "ОТЧЁТ ДЛЯ РИЕЛТОРА" if s.get("report_type") else "КЛИЕНТСКИЙ ОТЧЁТ",
+        )
         for i, text in enumerate(
             [
                 "Общая информация",
@@ -448,7 +466,7 @@ def render_pdf(s):
                 "Требования и блокеры",
                 "Расходы и бюджет",
                 "Источники и вопросы",
-                "Карта лидов · будущий модуль",
+                *(["Карта лидов · будущий модуль"] if "future:leads" in selected else []),
             ]
         ):
             line = para(text, "small")
@@ -480,7 +498,7 @@ def render_pdf(s):
         rightMargin=26,
         topMargin=53,
         bottomMargin=38,
-        title="LeaseFIT — клиентский отчёт",
+        title=s.get("format_label", "LeaseFIT — клиентский отчёт"),
         author=s["agency"],
     ).build(story, onFirstPage=chrome, onLaterPages=chrome)
     return buf.getvalue()

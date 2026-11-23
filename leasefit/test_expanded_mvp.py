@@ -291,7 +291,9 @@ class ExpandedMVPTests(TestCase):
         response = self.client.get(reverse("compare", args=[self.coffee.pk]))
         self.assertContains(response, "Методики всех 18 показателей")
         self.assertContains(response, "677 операций в месяц")
-        report = issue_report(self.coffee, [self.a], "", self.user, uuid4())
+        report = issue_report(
+            self.coffee, [self.a], "", self.user, uuid4(), report_type="broker_detailed"
+        )
         raw = bytes(report.pdf)
         parsed = "\n".join(
             page.extract_text() for page in PdfReader(BytesIO(raw)).pages

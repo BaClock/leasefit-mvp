@@ -110,9 +110,10 @@ class AcceptanceTests(TestCase):
     def result(self):
         return evaluate(self.p, self.owner, self.req).result
 
-    def issue(self, objects=None, key=None, comment=""):
+    def issue(self, objects=None, key=None, comment="", **options):
         return issue_report(
-            self.req, objects or [self.p], comment, self.owner, key or uuid.uuid4()
+            self.req, objects or [self.p], comment, self.owner, key or uuid.uuid4(),
+            **options,
         )
 
     def test_12_kw_blocker(self):
@@ -507,7 +508,7 @@ class AcceptanceTests(TestCase):
             sha256="a" * 64,
             author=self.owner,
         )
-        r = self.issue(comment="Клиентский комментарий")
+        r = self.issue(comment="Клиентский комментарий", report_type="broker_detailed")
         text = "".join(p.extract_text() for p in PdfReader(BytesIO(bytes(r.pdf))).pages)
         for s in [
             "Условная кофейня",
@@ -934,7 +935,7 @@ class AcceptanceTests(TestCase):
             "selection_version": req.selection_version,
         }
         url = f"/app/requests/{req.pk}/reports"
-        self.assertContains(c.post(url, report_form), "ПРЕДПРОСМОТР КЛИЕНТСКОЙ ВЕРСИИ")
+        self.assertContains(c.post(url, report_form), "ПРЕДПРОСМОТР СОДЕРЖАНИЯ")
         report_form["action"] = "issue"
         self.assertEqual(c.post(url, report_form).status_code, 302)
         c.post(url, report_form)
@@ -1114,7 +1115,9 @@ class AcceptanceTests(TestCase):
     def test_pdf_required_risks_cannot_be_removed_and_landscape_layout(self):
         self.observe(value=12)
         self.result()
-        snapshot = report_snapshot(self.req, [self.p], "", parameters=[])
+        snapshot = report_snapshot(
+            self.req, [self.p], "", parameters=[], report_type="broker_detailed"
+        )
         snapshot.update(
             version=1,
             issued_at=timezone.localtime().isoformat(),

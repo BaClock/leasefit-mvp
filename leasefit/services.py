@@ -1,5 +1,5 @@
 import hashlib, json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Prefetch, Q
@@ -14,10 +14,20 @@ from .operations import (
     value_label,
     weekly_coverage,
 )
-from .metrics import financial_metrics, evidence_summary
+from .metrics import financial_metrics, evidence_summary, opening_costs
 from .regulations import regulatory_checklist
 from .geography import district_description
 from .outcomes import assess_outcome, budget_excess, money_text, outcome_priority
+from .report_content import (
+    BROKER_CONCLUSIONS,
+    BROKER_DETAILED,
+    CLIENT_SECTIONS,
+    CLIENT_SHORT,
+    REPORT_FORMATS,
+    client_object,
+    client_summary,
+    public_text,
+)
 
 RULES_VERSION = "p0-3.2"
 LOAD_LINK = object()
@@ -707,22 +717,28 @@ def report_parameter_choices(req):
     ]
 
 
-def report_snapshot(req, objects, comment, parameters=None):
-    selected_parameters = (
-        set(dict(report_parameter_choices(req)))
-        if parameters is None
-        else set(parameters) & set(dict(report_parameter_choices(req)))
-    )
-    mandatory_ids = set(
-        r.pk for r in active_requirements(req) if r.priority == "required"
-    )
+def report_snapshot(
+    req, objects, comment, parameters=None, *, report_type=CLIENT_SHORT, conclusion=""
+):
+    if report_type not in REPORT_FORMATS:
+        raise ValueError("Выберите формат отчёта.")
+    if conclusion and conclusion not in BROKER_CONCLUSIONS:
+        raise ValueError("Выберите заключение риелтора.")
+    choices = dict(report_parameter_choices(req))
+    selected_parameters = set(choices) if parameters is None else set(parameters) & choices.keys()
+    requirements = list(active_requirements(req))
+    mandatory_ids = {r.pk for r in requirements if r.priority == "required"}
     wanted_ids = mandatory_ids | {
-        r.pk
-        for r in req.requirements.filter(priority="desired")
-        if f"requirement:{r.pk}" in selected_parameters
+        r.pk for r in requirements if f"requirement:{r.pk}" in selected_parameters
     }
     items = []
-    identifiers = []
+    client_items = []
+    identifiers = set()
+    labels = Counter(p.label.strip().casefold() for p in objects)
+    links = {
+        link.premises_id: link
+        for link in req.premises_links.filter(premises__in=objects)
+    }
     for p in objects:
         identifier = " / ".join(
             filter(None, [p.label.strip(), p.floor.strip(), p.number.strip()])
@@ -731,7 +747,7 @@ def report_snapshot(req, objects, comment, parameters=None):
             raise ValueError(
                 "Выбранные варианты должны иметь разные однозначные метки. Уточните этаж / номер."
             )
-        identifiers.append(identifier.casefold())
+        identifiers.add(identifier.casefold())
         ev = current_evaluation(p, req)
         if not ev:
             raise ValueError(
@@ -754,9 +770,51 @@ def report_snapshot(req, objects, comment, parameters=None):
                 ],
             }
         )
+        client_items.append(
+            client_object(
+                {
+                    **items[-1],
+                    "title": (
+                        p.label.strip()
+                        if labels[p.label.strip().casefold()] == 1
+                        else identifier
+                    ),
+                    "rows": ev.result["rows"],
+                    "commercial_conflict": p.commercial_status == "conflict",
+                },
+                district=p.district,
+                area=p.area,
+                opening=opening_costs(p, links.get(p.pk)),
+                working_days=req.financial_plan.get("working_days"),
+                pickup=req.business_format == "pickup",
+            )
+        )
+    summary = client_summary(client_items)
+    if conclusion == "recommend" and not summary["recommended"]:
+        raise ValueError(
+            "Заключение «Рекомендуем рассмотреть» доступно, когда хотя бы одно помещение "
+            "подходит по проверенным условиям."
+        )
+    if not conclusion:
+        conclusion = (
+            "recommend" if summary["recommended"] else
+            "conditional" if summary["conditional"] else "reject"
+        )
+    sections = CLIENT_SECTIONS if report_type == CLIENT_SHORT else [
+        "Итоги сравнения и обязательные требования",
+        "Техническая проверка и нормативные вопросы",
+        "Финансовая модель и источники подтверждения",
+        "Заключение риелтора и версия расчёта",
+        *(label for key, label in choices.items() if key in selected_parameters),
+    ]
     return serial(
         {
-            "layout_version": "presentation-v2",
+            "report_type": report_type,
+            "format_label": REPORT_FORMATS[report_type],
+            "layout_version": (
+                "client-short-v1" if report_type == CLIENT_SHORT else "broker-detailed-v1"
+            ),
+            "sections": sections,
             "parameters": sorted(selected_parameters),
             "rules_version": RULES_VERSION,
             "request": req.title,
@@ -767,16 +825,28 @@ def report_snapshot(req, objects, comment, parameters=None):
             "geography": district_description(req),
             "profile_version": req.version,
             "requirements": [
-                f"{r.get_priority_display()}: {r}" for r in active_requirements(req)
+                f"{r.get_priority_display()}: {r}" for r in requirements
             ],
             "objects": items,
             "comment": comment,
+            "broker_conclusion": {
+                "code": conclusion,
+                "label": BROKER_CONCLUSIONS[conclusion],
+            },
+            "client_content": {
+                "objects": client_items,
+                "summary": summary,
+                "comment": public_text(comment),
+            },
         }
     )
 
 
 @transaction.atomic
-def issue_report(req, objects, comment, user, key, parameters=None):
+def issue_report(
+    req, objects, comment, user, key, parameters=None, *, report_type=CLIENT_SHORT,
+    conclusion="",
+):
     req = ClientRequest.objects.select_for_update().get(pk=req.pk)
     from django.core.exceptions import PermissionDenied
 
@@ -786,6 +856,8 @@ def issue_report(req, objects, comment, user, key, parameters=None):
         raise ValueError("Верните запрос в работу перед выпуском отчёта.")
     old = Report.objects.filter(creation_key=key, request=req).first()
     if old:
+        if old.snapshot.get("report_type", BROKER_DETAILED) != report_type:
+            raise ValueError("Формат изменился после выпуска. Обновите форму отчёта.")
         return old
     # All mutations lock the same parent request, preventing mixed-version snapshots.
     requested_ids = {p.pk for p in objects}
@@ -798,9 +870,22 @@ def issue_report(req, objects, comment, user, key, parameters=None):
         raise ValueError("Не все помещения добавлены в этот запрос.")
     if not 1 <= len(objects) <= 4:
         raise ValueError("Выберите от 1 до 4 вариантов.")
-    snap = report_snapshot(req, objects, comment, parameters=parameters)
+    snap = report_snapshot(
+        req, objects, comment, parameters=parameters, report_type=report_type,
+        conclusion=conclusion,
+    )
+    identity = snap
+    if report_type == CLIENT_SHORT:
+        # Broker-only parameter choices do not change the short document.
+        identity = {
+            **snap,
+            "parameters": [],
+            "objects": [
+                (obj["id"], obj["evaluation_id"]) for obj in snap["objects"]
+            ],
+        }
     fingerprint = hashlib.sha256(
-        json.dumps(snap, sort_keys=True, ensure_ascii=False).encode()
+        json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     existing = Report.objects.filter(request=req, fingerprint=fingerprint).first()
     if existing:

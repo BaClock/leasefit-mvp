@@ -1858,3 +1858,16 @@ button.district-tag:hover {
     flex-direction: column;
   }
 }
+
+[data-report-type="client_short"] .compare .parameter-button {
+  display: none;
+}
+
+.report-preview-headline {
+  display: block;
+}
+
+.report-preview-sections {
+  columns: 2 14rem;
+  padding-inline-start: 1.3rem;
+}

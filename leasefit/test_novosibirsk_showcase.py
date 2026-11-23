@@ -24,7 +24,7 @@ from .models import (
     Report,
     RequestPremises,
 )
-from .services import current_evaluation, economics, evaluate, issue_report
+from .services import current_evaluation, economics, evaluate, issue_report, report_snapshot
 
 
 class ShowcaseTests(TestCase):
@@ -143,7 +143,7 @@ class ShowcaseTests(TestCase):
         pdf = "".join(
             page.extract_text() for page in PdfReader(BytesIO(original)).pages
         )
-        self.assertIn("Не подходит по текущему бюджету", pdf)
+        self.assertIn("Технически подходит, но", pdf)
         self.assertIn("28 000", pdf)
         req.budget = Decimal(130000)
         req.version += 1
@@ -167,6 +167,110 @@ class ShowcaseTests(TestCase):
         )
         report.refresh_from_db()
         self.assertEqual(bytes(report.pdf), original)
+
+    def test_short_and_detailed_pdf_share_preview_outcomes_and_keep_archive(self):
+        req = self.profile("NSK-B01")
+        req.budget = Decimal(95000)
+        req.save(update_fields=["budget"])
+        objects = [self.premises(code) for code in ("NSK-P01", "NSK-P11")]
+        for obj in objects:
+            RequestPremises.objects.create(request=req, premises=obj)
+            evaluate(obj, self.user, req)
+        legacy = Report.objects.create(
+            request=req, version=1, snapshot={"layout_version": "presentation-v2"},
+            pdf=b"%PDF-1.4\n% Historical file", fingerprint="a" * 64,
+            creation_key=uuid4(), author=self.user,
+        )
+        original = bytes(legacy.pdf)
+        url = reverse("compare", args=[req.pk])
+        default = self.client.get(url).context["preview"]
+        self.assertEqual(default["report_type"], "client_short")
+        self.assertIn("Помещения превышают бюджет", default["client_content"]["summary"]["headlines"])
+        self.assertEqual(len(default["objects"]), 2)
+
+        data = {
+            "objects": [p.pk for p in objects],
+            "version": req.version, "selection_version": req.selection_version,
+            "comment": "Обсудить смету. https://example.invalid/private-source",
+            "conclusion": "reject", "action": "preview",
+        }
+        reports = {}
+        for report_type in ("client_short", "broker_detailed"):
+            with self.subTest(report_type=report_type):
+                data.update(report_type=report_type, creation_key=str(uuid4()), action="preview")
+                response = self.client.post(url, data)
+                self.assertEqual(response.status_code, 200)
+                preview = response.context["preview"]
+                data["action"] = "issue"
+                self.assertEqual(self.client.post(url, data).status_code, 302)
+                report = Report.objects.get(creation_key=data["creation_key"])
+                self.assertEqual(report.snapshot["client_content"], preview["client_content"])
+                self.assertEqual(report.snapshot["sections"], preview["sections"])
+                self.assertEqual(report.snapshot["broker_conclusion"]["code"], "reject")
+                reports[report_type] = report
+        short, detailed = reports.values()
+        self.assertNotEqual(short.fingerprint, detailed.fingerprint)
+        self.assertNotEqual(short.snapshot["layout_version"], detailed.snapshot["layout_version"])
+        short_pdf = PdfReader(BytesIO(bytes(short.pdf)))
+        self.assertEqual(len(short_pdf.pages), 4)
+        first = " ".join(short_pdf.pages[0].extract_text().split())
+        for text in ("95 000", "123 000", "268 000", "28 000", "173 000", "Технически подходит"):
+            self.assertIn(text, first)
+        short_text = "\n".join(page.extract_text() for page in short_pdf.pages)
+        for text in ("private-source", "Будущий модуль", "http"):
+            self.assertNotIn(text, short_text)
+        self.assertIn("Заключение риелтора", short_text)
+        self.assertGreater(len(PdfReader(BytesIO(bytes(detailed.pdf))).pages), len(short_pdf.pages))
+        download = reverse("report_download", args=[legacy.pk])
+        self.assertEqual(b"".join(self.client.get(download).streaming_content), original)
+        self.client.force_login(self.other_user)
+        for report in (legacy, short, detailed):
+            self.assertEqual(
+                self.client.get(reverse("report_download", args=[report.pk])).status_code, 404
+            )
+
+    def test_short_pdf_displays_blockers_questions_and_missing_costs(self):
+        req = self.profile("NSK-B01")
+        req.budget = Decimal(95000)
+        req.save(update_fields=["budget"])
+        objects = [self.premises(f"NSK-P{number:02d}") for number in (1, 11, 16, 19)]
+        p01, _, p16, p19 = objects
+        power = p16.observations.get(characteristic__code="power_kw")
+        power.value = 2
+        power.save(update_fields=["value"])
+        p19.utilities = None
+        p19.save(update_fields=["utilities"])
+        for obj in objects:
+            link = RequestPremises.objects.create(request=req, premises=obj)
+            if obj == p01:
+                link.adaptation, link.equipment, link.initial_stock = 40000, 60000, 20000
+                link.other_once, link.cash_reserve = 0, 50000
+                link.save()
+            evaluate(obj, self.user, req)
+        snapshot = report_snapshot(req, objects, "")
+        summary = snapshot["client_content"]["summary"]
+        self.assertIn("Есть критические технические ограничения", summary["headlines"])
+        self.assertTrue(any("требует уточнения" in headline or "требуется уточнение" in headline for headline in summary["headlines"]))
+        results = {obj["id"]: result for obj, result in zip(snapshot["objects"], snapshot["client_content"]["objects"])}
+        self.assertTrue(results[p16.pk]["has_blocker"])
+        self.assertTrue(any("Подтвердите у собственника" in action for action in results[p19.pk]["actions"]))
+        self.assertIsNone(results[p19.pk]["monthly_rows"][2][1])
+        self.assertEqual(Decimal(results[p01.pk]["opening_total"]), 280000)
+        self.assertEqual(results[p01.pk]["break_even"], 1103)
+        self.assertEqual([scenario["percent"] for scenario in results[p01.pk]["scenarios"]], ["0", "10", "20"])
+        with self.assertRaisesMessage(ValueError, "хотя бы одно помещение"):
+            report_snapshot(req, objects, "Все подходят", conclusion="recommend")
+        for selection in ([p19], objects):
+            report = issue_report(req, selection, "", self.user, uuid4())
+            pages = PdfReader(BytesIO(bytes(report.pdf))).pages
+            self.assertGreaterEqual(len(pages), 4)
+            text = " ".join(" ".join(page.extract_text() for page in pages).split())
+            self.assertIn("Подтвердите у собственника", text)
+            self.assertIn("Полная сумма требует уточнения", text)
+            if len(selection) == 4:
+                self.assertIn("Есть критические технические ограничения", pages[0].extract_text())
+                self.assertIn("Первоначальные закупки", text)
+                self.assertIn("Снижение на 20%", text)
 
     def test_import_identity_idempotence_and_isolation(self):
         self.assertFalse(self.user.has_usable_password())
