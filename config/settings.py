@@ -122,3 +122,4 @@ SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "")
 
 
 METRAPI_API_KEY = os.getenv("METRAPI_API_KEY", "").strip()
+LEASEFIT_SHOWCASE = os.getenv("LEASEFIT_SHOWCASE", "") == "1"

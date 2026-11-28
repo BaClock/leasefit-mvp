@@ -7,13 +7,13 @@
       <h1>Все помещения</h1>
       <p>Одна карточка помещения — несколько клиентских запросов и независимые результаты проверки.</p>
     </div>
-    <a class="button" href="{% url 'start_premises' %}">＋ Добавить помещение</a>
+    <div class="actions">
+      {% if can_parse %}
+        <a class="button secondary" href="{% url 'parser' %}">Парсинг объявлений</a>
+      {% endif %}
+      <a class="button" href="{% url 'start_premises' %}">＋ Добавить помещение</a>
+    </div>
   </div>
-  {% if can_parse %}
-    <p>
-      <a href="{% url 'parser' %}">Парсинг объявлений</a>
-    </p>
-  {% endif %}
   {% include "catalog_filters.html" %}
   {% include "premises_cards.html" %}
 {% endblock %}

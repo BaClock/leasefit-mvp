@@ -22,6 +22,8 @@ docker compose --env-file .env.showcase -f compose.showcase.yaml exec web python
 
 Команды генерации используют PowerShell 7. Compose включает отдельную базу PostgreSQL `leasefit_showcase` и отдельный том проекта `leasefit-showcase`. Импорт также требует `DEBUG=1`, `LEASEFIT_SHOWCASE=1` и `--disposable-db`. Демо доступно локально по [127.0.0.1:8001/login](http://127.0.0.1:8001/login). Логин `novosibirsk-showcase@example.invalid`. Задайте пароль в интерактивном запросе `changepassword`. При первом импорте вход по паролю выключен.
 
+Для парсинга в демо добавьте `METRAPI_API_KEY` в `.env.showcase` и снова запустите `docker compose --env-file .env.showcase -f compose.showcase.yaml up -d --build`. Импортированные объявления сохраняются в каталоге демо. [Подключение Metrapi](METRAPI.md#локальный-запуск).
+
 Чтобы **сбросить только демо**, выполните `docker compose --env-file .env.showcase -f compose.showcase.yaml down --volumes` и повторите запуск, импорт и установку пароля. Эта команда удаляет том указанного демонстрационного проекта вместе с созданными в нём отчётами и правками. Для обычной остановки используйте `down` без `--volumes`.
 
 ## Помещения

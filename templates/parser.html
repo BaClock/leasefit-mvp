@@ -4,7 +4,11 @@
   <h1>Парсинг объявлений</h1>
   <p>Поиск коммерческой аренды в базе Metrapi. Проверьте данные и выберите объявление для каталога агентства.</p>
   {% if not configured %}
-    <p class="hint">Для поиска задайте METRAPI_API_KEY на сервере.</p>
+    <p class="hint">
+      Для поиска добавьте <code>METRAPI_API_KEY</code>
+      в {% if local_showcase %}<code>.env.showcase</code>{% else %}<code>.env</code>{% endif %}
+      на компьютере, где запущен LeaseFIT, и пересоздайте веб-контейнер.
+    </p>
   {% endif %}
   <section class="panel">
     <h2>Объявление по ссылке</h2>

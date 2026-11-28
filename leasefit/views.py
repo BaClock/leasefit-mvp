@@ -1844,6 +1844,7 @@ def parser_preview(request):
             "listing_form": listing_form,
             "lookup": lookup,
             "configured": bool(settings.METRAPI_API_KEY),
+            "local_showcase": settings.LEASEFIT_SHOWCASE,
             "results": results,
             "can_import": member is not None,
         },

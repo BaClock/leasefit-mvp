@@ -25,6 +25,7 @@ services:
       POSTGRES_PASSWORD: ${LEASEFIT_DEMO_DB_PASSWORD}
       SESSION_COOKIE_NAME: leasefit_showcase_session
       CSRF_COOKIE_NAME: leasefit_showcase_csrf
+      METRAPI_API_KEY: ${METRAPI_API_KEY:-}
     ports:
       - "127.0.0.1:${LEASEFIT_DEMO_PORT:-8001}:8000"
     depends_on:

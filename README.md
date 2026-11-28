@@ -28,6 +28,8 @@ docker compose exec web python manage.py seed_demo
 
 Порт можно изменить через `WEB_PORT` в `.env` (в среде проверки использован 8010). Проверка готовности: `curl -f http://localhost:8000/healthz`. Статус: `docker compose ps`; журнал: `docker compose logs --tail=100 web`.
 
+Парсинг доступен локально. Сохраните ключ Metrapi в `.env` как `METRAPI_API_KEY`, примените настройки через `docker compose up -d --build` и войдите как руководитель. Раздел «Парсинг» открывается из меню и из каталога помещений. [Настройка и отдельный режим демо](docs/METRAPI.md).
+
 Данные, исходные вложения и байты выпущенных PDF хранятся в PostgreSQL, в именованном томе `postgres_data`. `docker compose restart`, `down` и последующий `up` сохраняют данные. **Не используйте `down -v` для рабочей базы.**
 
 ## Адреса для существующего лендинга
