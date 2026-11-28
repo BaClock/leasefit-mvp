@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.core import signing
@@ -12,6 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .metrapi import ListingUnavailable, MetrapiError, preview_item
+from .forms import ObservationForm, PremisesForm
+from .management.commands.refresh_metrapi_listings import shorten_existing_schedule
 from .models import (
     Agency,
     Characteristic,
@@ -105,7 +108,7 @@ class MetrapiTests(TestCase):
         observations = p.observations.all()
         self.assertEqual(
             set(observations.values_list("characteristic__code", flat=True)),
-            {"area_sqm", "floor", "ceiling_height_m", "separate_entrance"},
+            {"area_sqm", "floor", "ceiling_height_m", "separate_entrance", "heating"},
         )
         self.assertTrue(
             all(
@@ -123,7 +126,7 @@ class MetrapiTests(TestCase):
         p.refresh_from_db()
         self.assertEqual(p.label, "Название после проверки")
         self.assertEqual(Premises.objects.count(), 1)
-        self.assertEqual(Observation.objects.count(), 4)
+        self.assertEqual(Observation.objects.count(), 5)
         self.assertEqual(publication.versions.count(), 1)
 
         token = signing.dumps(
@@ -283,6 +286,91 @@ class MetrapiTests(TestCase):
             preview_item({**LISTING, "description": "⚡ Mощность — 25 КBт"})["power"],
             "25.00",
         )
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_keyword_import_fills_missing_characteristics_and_prioritizes_api_fields(self, conn):
+        item = {
+            **LISTING,
+            "area_total": None, "floor": None, "ceiling_height": None,
+            "water_supply": "Нет", "heating": None, "entrance_type": "Общий",
+            "description": (
+                "Площадь помещения: 48,5 м². Этаж: 2. Высота потолков 3 м.\n"
+                "Вода и канализация. Приточная вентиляция. Отопление: центральное.\n"
+                "Отдельный вход. Витринные окна. Электрическая мощность 15 кВт, есть кондиционер."
+            ),
+        }
+        conn.return_value.getresponse.return_value = api_response({"items": [item]})
+        preview = self.client.post("/app/parser", self.search)
+        self.assertContains(preview, "Дополнительно из описания")
+        self.assertContains(preview, "Проверка имеющихся карточек")
+        p = Premises.objects.get()
+        self.assertEqual((p.area, p.floor), (Decimal("48.50"), "2"))
+        rows = {row.characteristic.code: row for row in p.observations.select_related("characteristic")}
+        self.assertEqual(rows["ceiling_height_m"].value, 3)
+        self.assertEqual(rows["power_kw"].value, 15)
+        self.assertIs(rows["water_supply"].boolean, False)
+        self.assertIs(rows["separate_entrance"].boolean, False)
+        for code in ("sewerage", "ventilation", "supply_ventilation", "heating", "display_windows", "air_conditioning"):
+            with self.subTest(code=code):
+                self.assertTrue(rows[code].boolean)
+                self.assertEqual((rows[code].status, rows[code].locator), ("unverified", "Описание объявления"))
+        card = self.client.get(reverse("catalog_premises", args=[p.pk]))
+        self.assertContains(card, "Ссылка на объявление ↗")
+        self.assertNotContains(card, 'name="document"')
+
+    def test_uncertain_text_does_not_create_characteristics(self):
+        parsed = preview_item({
+            "description": (
+                "Площадь 30–50 м². Этаж 1/2. Есть вода. Воды нет.\n"
+                "Можно сделать вентиляцию. Планируется отдельный вход.\n"
+                "Парковка для соседнего здания. Возможно увеличение мощности до 40 кВт."
+            )
+        })
+        self.assertEqual(parsed["facts"], {})
+
+    def test_listing_confirmation_form_accepts_link_as_only_source_detail(self):
+        p = Premises.objects.create(agency=self.agency, label="Лот")
+        fields = {
+            "characteristic": Characteristic.objects.get(code="power_kw").pk,
+            "value": 30, "scope": "premises", "status": "unverified",
+            "source_type": "listing", "source_url": LISTING["url"],
+            "creation_key": uuid4(),
+        }
+        form = ObservationForm(fields, agency=self.agency, premises=p)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertNotIn("document", form.fields)
+        obj = form.save(commit=False)
+        self.assertEqual((obj.source, obj.source_url), (LISTING["url"], LISTING["url"]))
+        self.assertEqual(obj.observed_on, timezone.localdate())
+        for invalid, field in (
+            ({"source_url": ""}, "source_url"),
+            ({"status": "confirmed"}, "source_type"),
+            ({"source_type": "document", "status": "confirmed"}, "source_type"),
+        ):
+            test = ObservationForm({**fields, **invalid}, agency=self.agency, premises=p)
+            self.assertFalse(test.is_valid())
+            self.assertIn(field, test.errors)
+        choices = dict(PremisesForm(instance=p).fields["commercial_source_type"].choices)
+        self.assertNotIn("document", choices)
+
+    @override_settings(METRAPI_REFRESH_HOURS=1)
+    def test_worker_shortens_existing_daily_schedule_without_moving_retry(self):
+        p = Premises.objects.create(agency=self.agency, label="Очередь")
+        now = timezone.now()
+        recent = ListingPublication.objects.create(
+            agency=self.agency, premises=p, source="avito", source_id="1",
+            checked_at=now - timedelta(minutes=15), next_check_at=now + timedelta(hours=23),
+        )
+        retry = ListingPublication.objects.create(
+            agency=self.agency, premises=p, source="avito", source_id="2",
+            checked_at=now - timedelta(hours=2), next_check_at=now + timedelta(minutes=30),
+        )
+        next_retry = retry.next_check_at
+        self.assertEqual(shorten_existing_schedule(), 1)
+        recent.refresh_from_db()
+        retry.refresh_from_db()
+        self.assertEqual(recent.next_check_at, recent.checked_at + timedelta(hours=1))
+        self.assertEqual(retry.next_check_at, next_retry)
 
     def test_ceiling_height_uses_only_an_unambiguous_description_as_fallback(self):
         for description in (

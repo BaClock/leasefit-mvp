@@ -447,6 +447,7 @@ def economics(p, request_obj=None, *, context=LOAD_LINK):
                 "source": p.commercial_source
                 or "Источник не указан — расчёт по ручным вводным",
                 "type": p.get_commercial_source_type_display(),
+                "listing_url": p.listing_url if p.commercial_source_type == "listing" else "",
                 "date": (
                     str(p.commercial_date) if p.commercial_date else "Дата неизвестна"
                 ),

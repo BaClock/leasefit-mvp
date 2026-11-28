@@ -27,7 +27,7 @@ services:
       SESSION_COOKIE_NAME: leasefit_showcase_session
       CSRF_COOKIE_NAME: leasefit_showcase_csrf
       METRAPI_API_KEY: ${METRAPI_API_KEY:-}
-      METRAPI_REFRESH_HOURS: ${METRAPI_REFRESH_HOURS:-24}
+      METRAPI_REFRESH_HOURS: ${METRAPI_REFRESH_HOURS:-1}
     ports:
       - "127.0.0.1:${LEASEFIT_DEMO_PORT:-8001}:8000"
     depends_on:

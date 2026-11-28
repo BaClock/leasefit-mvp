@@ -108,8 +108,8 @@
     </section>
   {% endif %}
   <section class="panel">
-    <h2>Источники и документы</h2>
-    <p>Новые технические документы доступны сотрудникам агентства. Исторические файлы прежних запросов сохраняют прежние ограничения. Исходники не включаются в PDF.</p>{% for f in files %}<p>
+    <h2>Файлы помещения</h2>
+    {% for f in files %}<p>
       <a href="{% url 'attachment_download' f.pk %}">↓ {{ f.filename }}</a>{% if f.origin_request_id %} · файл прежнего запроса{% endif %}</p>{% empty %}<p class="muted">Доступных документов нет.</p>{% endfor %}
   {% if can_edit %}<form method="post"
                          enctype="multipart/form-data"

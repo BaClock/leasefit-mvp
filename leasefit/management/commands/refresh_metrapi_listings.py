@@ -4,6 +4,8 @@ from time import sleep
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import DateTimeField, ExpressionWrapper, F, Value
+from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
 from leasefit.listing_catalog import refresh_publication
@@ -25,6 +27,15 @@ def claim_due_publication():
     return publication
 
 
+def shorten_existing_schedule():
+    now = timezone.now()
+    interval = timedelta(hours=settings.METRAPI_REFRESH_HOURS)
+    next_check = ExpressionWrapper(F("checked_at") + interval, output_field=DateTimeField())
+    return ListingPublication.objects.filter(next_check_at__gt=now + interval).update(
+        next_check_at=Greatest(Value(now), Coalesce(next_check, Value(now))),
+    )
+
+
 class Command(BaseCommand):
     help = "Recheck stored Metrapi publications when their refresh interval elapses."
 
@@ -38,6 +49,7 @@ class Command(BaseCommand):
             while not options["once"]:
                 sleep(3600)
             return
+        shorten_existing_schedule()
         limit = max(1, min(options["limit"], 1000))
         while True:
             processed, changed = self.run_batch(limit)

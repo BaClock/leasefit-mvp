@@ -1,7 +1,11 @@
 {% load leasefit_tags %}
 <section class="panel economics">
   <h2>Экономика аренды</h2>
-  <p class="source">Общие условия расчёта: {{ e.commercial_evidence.source }} · {{ e.commercial_evidence.type }} · {{ e.commercial_evidence.date }} · {{ e.commercial_evidence.status }} · {{ e.commercial_evidence.scope }}{% if e.commercial_evidence.confirmation %}<br>Основание: {{ e.commercial_evidence.confirmation }}{% endif %}</p>
+  {% if e.commercial_evidence.type == "Объявление" %}
+    {% if e.commercial_evidence.listing_url %}<p class="source">{% include "listing_source_link.html" with url=e.commercial_evidence.listing_url only %}</p>{% endif %}
+  {% else %}
+    <p class="source">Общие условия расчёта: {{ e.commercial_evidence.source }} · {{ e.commercial_evidence.type }} · {{ e.commercial_evidence.date }} · {{ e.commercial_evidence.status }} · {{ e.commercial_evidence.scope }}{% if e.commercial_evidence.confirmation %}<br>Основание: {{ e.commercial_evidence.confirmation }}{% endif %}</p>
+  {% endif %}
   <div class="metrics">
     <div>
       <small>{% if e.complete %}Полная месячная нагрузка{% else %}Известный месячный подытог{% endif %}</small>

@@ -55,7 +55,7 @@
             <strong class="status-text {{ cell.status }}">{{ cell.label }}</strong>
             <p>{{ cell.value }}</p>
             <p>{{ cell.reason }}</p>{% if cell.question %}<p class="question">{{ cell.question }}</p>{% endif %}
-            {% for src in cell.sources %}<p class="source">{{ src.source }} · {{ src.date }} · {{ src.scope }}</p>{% endfor %}</td>{% endfor %}</tr>{% endfor %}
+            {% for src in cell.sources %}<p class="source">{% if src.type == "Объявление" %}{% include "listing_source_link.html" with url=src.url only %}{% else %}{{ src.source }} · {{ src.date }} · {{ src.scope }}{% endif %}</p>{% endfor %}</td>{% endfor %}</tr>{% endfor %}
     <tr class="group-row">
       <th colspan="{{ columns|length|add:1 }}">Экономика · отдельно от технического статуса</th>
     </tr>
@@ -93,7 +93,7 @@
         <strong>{{ r.cell.label }}</strong>
         <p>{{ r.cell.value }}</p>
         <p>{{ r.cell.reason }}</p>{% if r.cell.question %}<p class="question">{{ r.cell.question }}</p>{% endif %}
-        {% for src in r.cell.sources %}<p class="source">{{ src.source }} · {{ src.date }}</p>{% endfor %}</article>{% endfor %}
+        {% for src in r.cell.sources %}<p class="source">{% if src.type == "Объявление" %}{% include "listing_source_link.html" with url=src.url only %}{% else %}{{ src.source }} · {{ src.date }}{% endif %}</p>{% endfor %}</article>{% endfor %}
     {% include "economics.html" with e=c.e outcome=c.outcome %}
   </section>
 {% endfor %}

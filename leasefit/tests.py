@@ -348,13 +348,13 @@ class AcceptanceTests(TestCase):
         self.observe(
             value=12, source_type="listing", status="unverified", confirmation=""
         )
-        o = self.observe(value=15)
+        o = self.observe(value=15, source_type="owner", source="Ответ собственника")
         self.assertEqual(self.result()["status"], "clarify")
         response = self.client.post(
             f"/app/requests/{self.req.pk}/objects/{self.p.pk}/observations/{o.pk}/resolve",
             {
                 "version": 1,
-                "reason": "Актуальный акт собственника; объявление ошибочно",
+                "reason": "Собственник уточнил мощность помещения",
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -904,11 +904,11 @@ class AcceptanceTests(TestCase):
                 "value": str(power),
                 "unit": "кВт",
                 "scope": "premises",
-                "source_type": "document",
-                "source": "Условный акт",
+                "source_type": "owner",
+                "source": "Ответ собственника",
                 "observed_on": str(timezone.localdate()),
                 "status": "confirmed",
-                "confirmation": "Условный подтверждающий документ",
+                "confirmation": "Ответ собственника по помещению",
                 "version": 1,
                 "creation_key": okey,
             }

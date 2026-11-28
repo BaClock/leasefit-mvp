@@ -122,5 +122,5 @@ SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "")
 
 
 METRAPI_API_KEY = os.getenv("METRAPI_API_KEY", "").strip()
-METRAPI_REFRESH_HOURS = max(1, int(os.getenv("METRAPI_REFRESH_HOURS", "24")))
+METRAPI_REFRESH_HOURS = max(1, int(os.getenv("METRAPI_REFRESH_HOURS", "1")))
 LEASEFIT_SHOWCASE = os.getenv("LEASEFIT_SHOWCASE", "") == "1"

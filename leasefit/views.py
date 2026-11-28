@@ -537,7 +537,6 @@ def property_page(
         obsform = ObservationForm(
             agency=request.member.agency,
             premises=p,
-            visible_files=files,
             initial=initial,
         )
     if shared:
@@ -741,7 +740,6 @@ def add_observation(request, object_id, pk=None):
         request.POST,
         agency=request.member.agency,
         premises=p,
-        visible_files=available_files(request, p),
     )
     if p.request_links.count() > 1:
         form.fields["confirm_shared"] = forms.BooleanField(
@@ -792,7 +790,7 @@ def resolve(request, object_id, observation_id, pk=None):
         not reason
         or len(reason) > 700
         or o.superseded
-        or o.source_type in ["archive", "listing"]
+        or o.source_type in ["archive", "listing", "document"]
         or o.scope != "premises"
         or (
             o.value is None
@@ -803,7 +801,7 @@ def resolve(request, object_id, observation_id, pk=None):
     ):
         messages.error(
             request,
-            "Нужны актуальное значение помещения, документ / ответ и основание выбора.",
+            "Для подтверждения нужны актуальное значение помещения и основание выбора.",
         )
     else:
         p.observations.filter(characteristic_id=o.characteristic_id).exclude(

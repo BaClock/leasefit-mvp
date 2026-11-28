@@ -12,6 +12,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from .characteristics import BY_CODE
+from .listing_keywords import FACILITIES, boolean_facts, single_area, single_floor
 
 API_HOST = "api.metrapi.ru"
 SOURCES = {
@@ -49,11 +51,11 @@ CEILING_IN_DESCRIPTION = re.compile(
     re.IGNORECASE,
 )
 POWER_IN_DESCRIPTION = re.compile(
-    r"(?:^|[\n;.!?])\s*(?:[•·*⚡–—-]\s*)?"
+    r"(?:^|[\n;,!?]|\.(?![0-9]))\s*(?:[•·*⚡–—-]\s*)?"
     r"(?:выделенная(?: электрическая)? мощность|электрическая мощность|электромощность"
     r"|мощность(?: электричества)?|электричество|электроснабжение|выделено(?: на помещение)?)"
     r"\s*(?:[:=–—-]\s*)?([0-9]{1,5}(?:[.,][0-9]{1,2})?)\s*квт"
-    r"[^\S\n]*(?=$|[\n;.!?](?![0-9]))",
+    r"[^\S\n]*(?=$|[\n;,.!?](?![0-9]))",
     re.IGNORECASE,
 )
 CYRILLIC_LOOKALIKES = str.maketrans("abcekmoptxy", "авсекмортху")
@@ -68,6 +70,20 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_SHORT_RETRY_SECONDS = 3
 MAX_LISTING_DESCRIPTION = 32000
 MAX_LISTING_PHOTOS = 80
+BOOLEAN_FIELDS = {
+    "separate_entrance": ("entrance_type", {"отдельный"}, {"общий"}),
+    "water_supply": ("water_supply", {"центральное", "скважина", "колодец"}, set()),
+    "sewerage": ("sewerage", {"центральная", "септик", "выгребная яма"}, set()),
+    "heating": (
+        "heating",
+        {"центральное", "автономное", "газовое", "электрическое", "твердотопливное", "печь или камин"},
+        set(),
+    ),
+    "parking": (
+        "parking", {"открытая", "закрытая", "наземная", "подземная", "многоуровневая", "бесплатная", "платная"},
+        set(),
+    ),
+}
 
 
 class MetrapiError(Exception):
@@ -321,6 +337,31 @@ def ceiling_height_from_description(description):
     return height if height is not None and Decimal(height) > 0 else None
 
 
+def reported_booleans(item, description):
+    extracted = boolean_facts(description)
+    facts = {}
+    for code in FACILITIES:
+        field, positive, negative = BOOLEAN_FIELDS.get(code, (code, set(), set()))
+        raw = item.get(field)
+        if isinstance(raw, list) and raw:
+            variants = {to_text(value).strip().casefold().replace("ё", "е") for value in raw}
+            if variants <= positive | {"да", "есть"}:
+                facts[code] = {"boolean": True}
+            elif variants <= negative | {"нет", "отсутствует"}:
+                facts[code] = {"boolean": False}
+            continue
+        value = to_text(raw).casefold().replace("ё", "е")
+        if isinstance(raw, bool):
+            facts[code] = {"boolean": raw}
+        elif value in positive | {"да", "есть", "1", "true"}:
+            facts[code] = {"boolean": True}
+        elif value in negative | {"нет", "отсутствует", "0", "false"}:
+            facts[code] = {"boolean": False}
+        elif value in {"", "не указано", "неизвестно"} and code in extracted:
+            facts[code] = {"boolean": extracted[code], "locator": "Описание объявления"}
+    return facts
+
+
 def preview_item(item):
     unit = to_text(item.get("price_unit")).lower()
     period = to_text(item.get("price_period")).lower()
@@ -351,19 +392,27 @@ def preview_item(item):
     except ValidationError:
         url = ""
 
-    area = decimal_value(item.get("area_total"))
-    floor = to_text(item.get("floor"), 40)
-    facts = {}
-    if area and Decimal(area) > 0:
-        facts["area_sqm"] = {"value": area}
-    if floor:
-        facts["floor"] = {"text": floor}
     raw_description = item.get("description")
     description = (
         raw_description.replace("\x00", "")[:MAX_LISTING_DESCRIPTION]
         if isinstance(raw_description, str)
         else ""
     )
+    facts = reported_booleans(item, description)
+    area = decimal_value(item.get("area_total"))
+    if area is not None and Decimal(area) > 0:
+        facts["area_sqm"] = {"value": area}
+    else:
+        area = single_area(description)
+        if area is not None:
+            facts["area_sqm"] = {"value": area, "locator": "Описание объявления"}
+    floor = to_text(item.get("floor"), 40)
+    if floor:
+        facts["floor"] = {"text": floor}
+    else:
+        floor = single_floor(description)
+        if floor:
+            facts["floor"] = {"text": floor, "locator": "Описание объявления"}
     height = decimal_value(item.get("ceiling_height"))
     height_from_description = False
     if height is None or Decimal(height) <= 0:
@@ -374,11 +423,11 @@ def preview_item(item):
         if height_from_description:
             facts[CEILING_HEIGHT_CODE]["locator"] = "Описание объявления"
     entrance = to_text(item.get("entrance_type"))
-    if entrance.casefold() in {"отдельный", "общий"}:
-        facts["separate_entrance"] = {"boolean": entrance.casefold() == "отдельный"}
 
-    power = None
-    if isinstance(raw_description, str):
+    power = decimal_value(item.get("power_kw"))
+    if power is not None:
+        facts["power_kw"] = {"value": power}
+    elif isinstance(raw_description, str):
         matches = {
             decimal_value(match[1].replace(",", "."))
             for match in POWER_IN_DESCRIPTION.finditer(
@@ -388,7 +437,19 @@ def preview_item(item):
         if len(matches) == 1:
             power = matches.pop()
             if power is not None:
-                facts["power_kw"] = {"value": power}
+                facts["power_kw"] = {"value": power, "locator": "Описание объявления"}
+
+    description_facts = []
+    for code in sorted(facts):
+        fact = facts[code]
+        if not fact.get("locator") or code in {CEILING_HEIGHT_CODE, "power_kw"}:
+            continue
+        spec = BY_CODE[code]
+        if "boolean" in fact:
+            value = "Есть" if fact["boolean"] else "Нет"
+        else:
+            value = " ".join(filter(None, (fact.get("value") or fact.get("text"), spec["unit"])))
+        description_facts.append((spec["label"], value))
 
     tax_form = to_text(item.get("tax_form"))
     vat_mode = {"ндс включён": "included", "ндс не включён": "excluded"}.get(
@@ -427,6 +488,7 @@ def preview_item(item):
         "entrance": entrance,
         "power": power,
         "facts": facts,
+        "description_facts": description_facts,
         "lease_type": to_text(item.get("lease_type")),
         "heating": to_text(item.get("heating")),
         "parking": to_text(item.get("parking")),

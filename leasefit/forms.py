@@ -115,6 +115,11 @@ RequirementsFormSet = inlineformset_factory(
 
 class PremisesForm(VersionForm):
     location_fields = {"city", "district", "location_confirmed"}
+    commercial_evidence_fields = {
+        "area", "rent", "rate", "operating", "utilities", "other_monthly",
+        "vat_mode", "vat_rate", "deposit", "deposit_refundable", "commission",
+        "commercial_source", "commercial_date", "commercial_confirmation",
+    }
     essential_fields = {
         "label",
         "premises_type",
@@ -127,7 +132,7 @@ class PremisesForm(VersionForm):
 
     class Meta:
         model = Premises
-        exclude = ["agency", "updated_at", "version", "creation_key"]
+        exclude = ["agency", "updated_at", "version", "creation_key", "listing_conflicts"]
         widgets = {
             "internal_notes": forms.Textarea(attrs={"rows": 3}),
             "assumptions": forms.Textarea(attrs={"rows": 3}),
@@ -138,6 +143,12 @@ class PremisesForm(VersionForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        source = self.fields["commercial_source_type"]
+        source.choices = [
+            (code, "Документ (ранее записано)" if code == "document" else name)
+            for code, name in source.choices
+            if code != "document" or self.instance.pk and self.instance.commercial_source_type == "document"
+        ]
         if self.is_bound and not self.location_fields.intersection(self.data):
             # Older clients can edit the other fields without clearing geography.
             for field in self.location_fields:
@@ -145,6 +156,17 @@ class PremisesForm(VersionForm):
 
     def clean(self):
         d = super().clean()
+        source_type = d.get("commercial_source_type")
+        if source_type == "listing":
+            if not d.get("listing_url"):
+                self.add_error("listing_url", "Укажите ссылку на объявление.")
+            if self.instance.pk and self.instance.commercial_source_type == "listing":
+                d["commercial_source"] = self.instance.commercial_source or d.get("listing_url", "")
+                d["commercial_date"] = self.instance.commercial_date
+            else:
+                d["commercial_source"] = d.get("listing_url", "")
+                d["commercial_date"] = None
+            d["commercial_confirmation"] = ""
         if d.get("location_confirmed") and not d.get("city"):
             self.add_error("city", "Укажите город перед подтверждением местоположения.")
         if d.get("commercial_date") and d["commercial_date"] > timezone.localdate():
@@ -159,6 +181,15 @@ class PremisesForm(VersionForm):
                 "commercial_status",
                 "Подтверждение требует источника, даты и основания. Объявление само по себе не подтверждает условия.",
             )
+        elif (
+            d.get("commercial_status") == "confirmed"
+            and source_type == "document"
+            and (
+                self.instance.commercial_status != "confirmed"
+                or self.commercial_evidence_fields.intersection(self.changed_data)
+            )
+        ):
+            self.add_error("commercial_status", "Для нового подтверждения выберите ответ собственника или ручной ввод.")
         return d
 
     def clean_vat_rate(self):
@@ -201,7 +232,6 @@ class ObservationForm(forms.ModelForm):
             "source",
             "source_url",
             "observed_on",
-            "document",
         ]
         widgets = {
             "characteristic": CharacteristicSelect(),
@@ -217,10 +247,10 @@ class ObservationForm(forms.ModelForm):
         }
         help_texts = {
             "status": "Если значение неизвестно, выберите «Неизвестно». Для статуса «Подтверждено» укажите основание.",
-            "confirmation": "Например, номер документа или дата письменного ответа собственника.",
+            "confirmation": "Например, дата ответа собственника или результат осмотра.",
         }
 
-    def __init__(self, *args, agency=None, premises=None, visible_files=None, **kwargs):
+    def __init__(self, *args, agency=None, premises=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["characteristic"].queryset = (
             Characteristic.objects.filter(
@@ -229,10 +259,13 @@ class ObservationForm(forms.ModelForm):
             if agency
             else Characteristic.objects.none()
         )
-        self.fields["document"].queryset = (
-            visible_files if visible_files is not None else Attachment.objects.none()
-        )
-        self.fields["document"].label = "Подтверждающий документ из доступных вложений"
+        source_type = self.fields["source_type"]
+        source_type.choices = [
+            (code, label) for code, label in source_type.choices
+            if code not in {"document", "archive"}
+        ]
+        self.fields["source"].required = False
+        self.fields["observed_on"].required = False
         self.fields["boolean"].widget.choices = [
             ("", "Выберите значение"),
             ("true", "Да"),
@@ -313,14 +346,27 @@ class ObservationForm(forms.ModelForm):
                     "status",
                     "Для известного значения выберите «Не подтверждено» или подтверждение.",
                 )
-        if status == "confirmed":
-            if not d.get("confirmation"):
-                self.add_error("confirmation", "Укажите основание подтверждения.")
-            if d.get("source_type") == "listing":
+        if d.get("source_type") == "listing":
+            if not d.get("source_url"):
+                if "source_url" not in self.errors:
+                    self.add_error("source_url", "Укажите ссылку на объявление.")
+            else:
+                d["source"] = d["source_url"][:Observation._meta.get_field("source").max_length]
+            if not d.get("observed_on") and "observed_on" not in self.errors:
+                d["observed_on"] = timezone.localdate()
+            d["confirmation"] = ""
+            if status == "confirmed":
                 self.add_error(
                     "source_type",
                     "Объявление само по себе не подтверждает характеристику.",
                 )
+        elif d.get("source_type"):
+            if not d.get("source"):
+                self.add_error("source", "Укажите источник сведений.")
+            if not d.get("observed_on") and "observed_on" not in self.errors:
+                self.add_error("observed_on", "Укажите дату сведений.")
+            if status == "confirmed" and not d.get("confirmation"):
+                self.add_error("confirmation", "Укажите основание подтверждения.")
         return d
 
     def save(self, commit=True):

@@ -6,9 +6,11 @@
   <p>
     <strong>Значение:</strong> {{ row.value }}
   </p>
-  <p>{{ row.reason }}</p>{% for src in row.sources %}<p class="source">{{ src.source }} · {{ src.type }} · {{ src.date }} · {{ src.scope }}{% if src.superseded %} · заменено при разрешении конфликта{% endif %}
+  <p>{{ row.reason }}</p>{% for src in row.sources %}<p class="source">
+    {% if src.type == "Объявление" %}{% include "listing_source_link.html" with url=src.url only %}
+    {% else %}{{ src.source }} · {{ src.type }} · {{ src.date }} · {{ src.scope }}{% if src.superseded %} · заменено при разрешении конфликта{% endif %}
     {% if src.url %} · <a href="{{ src.url }}"
                           target="_blank"
                           rel="noopener noreferrer">Источник ↗</a>{% endif %}
-    {% if src.confirmation %}<br>Основание: {{ src.confirmation }}{% endif %}</p>{% endfor %}
+    {% if src.confirmation %}<br>Основание: {{ src.confirmation }}{% endif %}{% endif %}</p>{% endfor %}
 {% if row.question %}<div class="question">Вопрос собственнику: {{ row.question }}</div>{% endif %}</article>

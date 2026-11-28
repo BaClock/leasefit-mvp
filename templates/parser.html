@@ -10,7 +10,7 @@
     </p>
   {% endif %}
   <section class="panel">
-    <h2>Объявление по ссылке</h2>
+    <h2>Проверка имеющихся карточек</h2>
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="mode" value="listing">
@@ -43,7 +43,7 @@
       {% for item in results %}
         <article class="request-card">
           <h3>{{ item.title }}</h3>
-          <p>{{ item.label }} · {{ item.source_label }} · {{ item.date }}</p>
+          <p>{{ item.label }}</p>
           {% if item.district %}<p>Район по объявлению: {{ item.district }}</p>{% endif %}
           {% if item.url %}
             <p><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a></p>
@@ -76,8 +76,12 @@
               <dd>{{ item.entrance|default:"—" }} · {{ item.tax_form|default:"—" }}</dd>
             {% endif %}
             {% if item.power %}
-              <dt>Мощность из текста объявления</dt>
+              <dt>Электрическая мощность{% if item.facts.power_kw.locator %} из текста объявления{% endif %}</dt>
               <dd>{{ item.power }} кВт · требует подтверждения</dd>
+            {% endif %}
+            {% if item.description_facts %}
+              <dt>Дополнительно из описания</dt>
+              <dd>{% for name, value in item.description_facts %}{{ name }} — {{ value }}{% if not forloop.last %} · {% endif %}{% endfor %}</dd>
             {% endif %}
             {% if item.lease_type or item.heating or item.parking or item.commercial_layout or item.commercial_building_type %}
               <dt>Дополнительные сведения для ручной проверки</dt>

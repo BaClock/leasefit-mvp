@@ -1,4 +1,24 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const commercialType = document.getElementById("id_commercial_source_type");
+  if (commercialType) {
+    const fields = commercialType.form.elements;
+    const status = fields.namedItem("commercial_status");
+    const listingUrl = fields.namedItem("listing_url");
+    const syncCommercialSource = () => {
+      const listing = commercialType.value === "listing";
+      for (const name of ["commercial_source", "commercial_date", "commercial_confirmation"]) {
+        const field = fields.namedItem(name);
+        field.closest(".field").hidden = listing;
+        field.disabled = listing;
+      }
+      status.querySelector('option[value="confirmed"]').disabled = listing;
+      if (listing && status.value === "confirmed") status.value = "unverified";
+      listingUrl.required = listing;
+    };
+    commercialType.addEventListener("change", syncCommercialSource);
+    syncCommercialSource();
+  }
+
   for (const gallery of document.querySelectorAll("[data-listing-gallery]")) {
     const photos = [...gallery.querySelectorAll(".listing-photo")];
     const viewer = gallery.querySelector("dialog");
@@ -220,6 +240,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = select.form;
   const status = form.elements.namedItem("status");
   const confirmation = form.elements.namedItem("confirmation");
+  const sourceType = form.elements.namedItem("source_type");
+  const sourceUrl = form.elements.namedItem("source_url");
   const sync = () => {
     const option = select.selectedOptions[0],
       kind = option?.dataset.kind;
@@ -247,7 +269,20 @@ document.addEventListener("DOMContentLoaded", () => {
       field.hidden = !active;
       for (const input of inputs) input.disabled = !active;
     }
-    confirmation.required = status.value === "confirmed";
+    const listing = sourceType.value === "listing";
+    status.querySelector('option[value="confirmed"]').disabled = listing;
+    if (listing && status.value === "confirmed") status.value = "unverified";
+    for (const name of ["source", "locator", "confirmation", "observed_on"]) {
+      const field = form.elements.namedItem(name);
+      field.closest(".field").hidden = listing;
+      field.disabled = listing;
+    }
+    form.elements.namedItem("source").required = !listing;
+    form.elements.namedItem("observed_on").required = !listing;
+    sourceUrl.required = listing;
+    sourceUrl.closest(".field").querySelector("label").textContent =
+      listing ? "Ссылка на объявление" : "Ссылка на источник";
+    confirmation.required = !listing && status.value === "confirmed";
     const label = form.elements
       .namedItem("value")
       .closest(".field")
@@ -257,6 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   select.addEventListener("change", sync);
   status.addEventListener("change", sync);
+  sourceType.addEventListener("change", sync);
   sync();
 });
 
