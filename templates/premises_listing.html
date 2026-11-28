@@ -1,12 +1,41 @@
 <section class="panel listing-panel" aria-labelledby="listing-heading">
   <div class="listing-heading">
-    <h2 id="listing-heading">Объявление</h2>
+    <h2 id="listing-heading">{% if publications|length > 1 %}Объявления{% else %}Объявление{% endif %}</h2>
     {% if listing.url %}
       <a href="{{ listing.url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a>
     {% elif p.listing_url %}
       <a href="{{ p.listing_url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a>
     {% endif %}
   </div>
+  {% if p.listing_conflicts %}
+    <div class="listing-conflicts">
+      <h3>Требует уточнения</h3>
+      <dl>
+        {% for conflict in p.listing_conflicts %}
+          <dt>{{ conflict.label }}</dt>
+          <dd>{% for item in conflict.values %}<span>{{ item.source }} — {% if item.value is True %}есть{% elif item.value is False %}нет{% else %}{{ item.value }}{% endif %}</span>{% endfor %}</dd>
+        {% endfor %}
+      </dl>
+    </div>
+  {% endif %}
+  {% if publications %}
+    <ul class="listing-source-list">
+      {% for source in publications %}
+        <li>
+          <a href="{% url 'publication_history' p.pk source.entry.pk %}">{{ source.label }} · История версий ↗</a>
+          {% if source.entry.snapshot.state == "unavailable" %}
+            <span class="pill clarify">Недоступно на площадке</span>
+          {% elif source.entry.snapshot.state == "legacy" %}
+            <span class="pill neutral">Ожидает проверки</span>
+          {% else %}
+            <span class="pill neutral">Версия {{ source.entry.version }}</span>
+          {% endif %}
+          {% if source.entry.checked_at %}<small>Проверено {{ source.entry.checked_at|date:"d.m.Y H:i" }}</small>{% endif %}
+          <small>Следующая проверка {{ source.entry.next_check_at|date:"d.m.Y H:i" }}</small>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
   {% if listing.photos %}
     <div data-listing-gallery>
       <h3>Фото помещения</h3>

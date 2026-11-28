@@ -15,8 +15,9 @@ services:
       retries: 15
     restart: unless-stopped
   web:
+    image: leasefit-showcase-web:latest
     build: .
-    environment:
+    environment: &showcase_web_environment
       DEBUG: "1"
       LEASEFIT_SHOWCASE: "1"
       SECRET_KEY: ${LEASEFIT_DEMO_SECRET_KEY:?Set LEASEFIT_DEMO_SECRET_KEY in .env.showcase}
@@ -26,6 +27,7 @@ services:
       SESSION_COOKIE_NAME: leasefit_showcase_session
       CSRF_COOKIE_NAME: leasefit_showcase_csrf
       METRAPI_API_KEY: ${METRAPI_API_KEY:-}
+      METRAPI_REFRESH_HOURS: ${METRAPI_REFRESH_HOURS:-24}
     ports:
       - "127.0.0.1:${LEASEFIT_DEMO_PORT:-8001}:8000"
     depends_on:
@@ -36,6 +38,15 @@ services:
       interval: 5s
       timeout: 6s
       retries: 10
+    restart: unless-stopped
+  listing-refresh:
+    image: leasefit-showcase-web:latest
+    pull_policy: never
+    environment: *showcase_web_environment
+    command: ["python", "manage.py", "refresh_metrapi_listings"]
+    depends_on:
+      web:
+        condition: service_healthy
     restart: unless-stopped
 volumes:
   showcase_postgres:

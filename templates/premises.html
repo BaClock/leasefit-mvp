@@ -9,6 +9,7 @@
       <div>
         <div class="eyebrow">ОБЩАЯ КАРТОЧКА АГЕНТСТВА</div>
         <h1>{% if new_object %}Новое помещение{% else %}{{ p.label }}{% endif %}</h1>
+        {% if p.pk %}<p class="premises-id">Помещение №{{ p.pk }}</p>{% endif %}
         <p>Характеристики объекта общие. Требования, выводы и заметки клиента принадлежат запросу.</p>
       </div>
       {% if not req and not new_object %}
@@ -21,7 +22,7 @@
         {% include "primary_limitations.html" with review=outcome %}
       </section>
     {% endif %}
-    {% if listing or can_refresh_listing %}
+    {% if listing or can_refresh_listing or publications %}
       {% include "premises_listing.html" %}
     {% endif %}
     {% if shared %}<div class="notice warning">Помещение используется в нескольких запросах ({{ use_count }}). Изменение общих характеристик потребует пересчёта связанных оценок. Перед сохранением подтвердите изменение.</div>{% endif %}

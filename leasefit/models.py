@@ -283,6 +283,7 @@ class Premises(models.Model):
         "Возвратность депозита подтверждена", default=False
     )
     commission = models.DecimalField("Комиссия, ₽", **money)
+    listing_conflicts = models.JSONField(default=list, blank=True)
     version = models.PositiveIntegerField(default=1)
     creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -300,6 +301,48 @@ class PremisesListing(models.Model):
     url = models.URLField(max_length=1500, blank=True)
     description = models.TextField(blank=True)
     photos = models.JSONField(default=list, blank=True)
+    projected = models.JSONField(default=dict, blank=True)
+
+
+class ListingPublication(models.Model):
+    agency = models.ForeignKey(Agency, on_delete=models.PROTECT)
+    premises = models.ForeignKey(
+        Premises, on_delete=models.CASCADE, related_name="publications"
+    )
+    source = models.CharField(max_length=40)
+    source_id = models.CharField(max_length=80)
+    group_id = models.CharField(max_length=120, blank=True)
+    version = models.PositiveIntegerField(default=0)
+    snapshot = models.JSONField(default=dict)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    next_check_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agency", "source", "source_id"],
+                name="unique_agency_listing_publication",
+            )
+        ]
+        indexes = [models.Index(fields=["agency", "group_id"], name="listing_agency_group_idx")]
+
+
+class ListingPublicationVersion(models.Model):
+    publication = models.ForeignKey(
+        ListingPublication, on_delete=models.CASCADE, related_name="versions"
+    )
+    number = models.PositiveIntegerField()
+    captured_at = models.DateTimeField(default=timezone.now)
+    snapshot = models.JSONField()
+    changes = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["publication", "number"], name="unique_listing_publication_version"
+            )
+        ]
 
 
 class RequestPremises(models.Model):

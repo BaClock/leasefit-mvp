@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="breadcrumb">
+    <a href="{% url 'catalog_premises' p.pk %}">← Помещение №{{ p.pk }}</a>
+  </div>
+  <div class="page-heading"><div>
+    <h1>История объявления</h1>
+    <p>{{ title }} · {{ p.label }}</p>
+  </div></div>
+  {% for version in versions %}
+    <section class="panel" aria-label="Версия {{ version.entry.number }}">
+      <div class="listing-heading">
+        <h2>Версия {{ version.entry.number }}</h2>
+        <span>{{ version.entry.captured_at|date:"d.m.Y H:i" }}</span>
+      </div>
+      {% if version.entry.snapshot.state == "unavailable" %}
+        <p class="pill clarify">Недоступно на площадке</p>
+      {% elif version.entry.snapshot.state == "legacy" %}
+        <p class="pill neutral">Материалы из ранее сохранённой карточки</p>
+      {% endif %}
+      {% if version.entry.changes %}<p>Изменилось · {{ version.entry.changes|join:", " }}</p>{% endif %}
+      {% if version.entry.snapshot.url %}<p><a href="{{ version.entry.snapshot.url }}" target="_blank" rel="noopener noreferrer">Объявление на площадке ↗</a></p>{% endif %}
+      <details>
+        <summary>Данные этой версии</summary>
+        {% if version.fields %}
+          <dl class="publication-fields">
+            {% for name, value in version.fields %}
+              <div><dt>{{ name }}</dt><dd>{% if value is True %}есть{% elif value is False %}нет{% else %}{{ value }}{% endif %}</dd></div>
+            {% endfor %}
+          </dl>
+        {% endif %}
+        {% if version.entry.snapshot.description %}<div class="listing-description">{{ version.entry.snapshot.description }}</div>{% endif %}
+        {% if version.entry.snapshot.photos %}
+          <p>
+            {% for url in version.entry.snapshot.photos %}
+              <a href="{{ url }}" target="_blank" rel="noopener noreferrer">Фото {{ forloop.counter }}</a>{% if not forloop.last %} · {% endif %}
+            {% endfor %}
+          </p>
+        {% endif %}
+      </details>
+    </section>
+  {% endfor %}
+  {% if page.paginator.num_pages > 1 %}
+    <nav class="actions" aria-label="Страницы истории">
+      {% if page.has_previous %}<a class="button secondary" href="?page={{ page.previous_page_number }}">← Новее</a>{% endif %}
+      <span>{{ page.number }} из {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}<a class="button secondary" href="?page={{ page.next_page_number }}">Старее →</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

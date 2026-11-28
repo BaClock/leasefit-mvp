@@ -78,6 +78,10 @@ class ListingNotFound(MetrapiError):
     pass
 
 
+class ListingUnavailable(MetrapiError):
+    pass
+
+
 def search_rentals(*, locality, query="", area_min=None, area_max=None, limit=10):
     params = {
         "locality": locality,
@@ -148,11 +152,11 @@ def find_rental(reference):
     try:
         item = get_payload(f"/item/{source}/{source_id}").get("item")
     except ListingNotFound:
-        raise MetrapiError(error) from None
+        raise ListingUnavailable(error) from None
     if item is None:
-        raise MetrapiError(error)
+        raise ListingUnavailable(error)
     if not is_commercial_rental(item):
-        raise MetrapiError(
+        raise ListingUnavailable(
             "Объявление должно быть действующим предложением коммерческой аренды помещения."
         )
     if item.get("source") != source or to_text(item.get("source_id")) != source_id:
@@ -398,6 +402,8 @@ def preview_item(item):
         "source": source,
         "source_label": SOURCES.get(source, source),
         "source_id": source_id,
+        "group_id": to_text(item.get("group_id"), 120),
+        "group_spread_m": decimal_value(item.get("group_spread_m")),
         "url": url,
         "date": source_date(item),
         "price": decimal_value(item.get("price")),

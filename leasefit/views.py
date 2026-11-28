@@ -42,9 +42,13 @@ from .forms import *
 from .services import *
 from .characteristics import GROUPS, STANDARD, resolve_characteristic
 from .metrapi import (
-    CEILING_HEIGHT_CODE, MetrapiError, find_rental, listing_reference, search_rentals,
+    CEILING_HEIGHT_CODE, ListingUnavailable, MetrapiError, find_rental,
+    listing_reference, search_rentals,
 )
-from .metrapi_listings import premises_listing_reference, save_listing, source_name
+from .metrapi_listings import premises_listing_reference
+from .listing_catalog import (
+    SNAPSHOT_FIELDS, display_value, import_listings, publication_label, refresh_publication,
+)
 
 
 def workspace(fn):
@@ -610,6 +614,10 @@ def property_page(
     }
     if p.pk:
         ctx["listing"] = getattr(p, "listing", None)
+        ctx["publications"] = [
+            {"entry": publication, "label": publication_label(publication)}
+            for publication in p.publications.order_by("pk")
+        ]
         ctx["can_refresh_listing"] = bool(
             ctx["can_edit"]
             and settings.METRAPI_API_KEY
@@ -1796,20 +1804,6 @@ def parser_member(user):
     return member if member and member.active else None
 
 
-def metrapi_import_key(agency_id, item):
-    return uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        f"leasefit/metrapi/{agency_id}/{item['source']}/{item['source_id']}",
-    )
-
-
-def existing_metrapi_card(catalog, key, url):
-    return (
-        catalog.filter(creation_key=key).first()
-        or catalog.filter(listing_url=url).order_by("pk").first()
-    )
-
-
 @login_required
 @require_http_methods(["GET", "POST"])
 def parser_preview(request):
@@ -1820,6 +1814,7 @@ def parser_preview(request):
     listing_form = MetrapiListingForm(data if lookup else None)
     active_form = listing_form if lookup else form
     results = None
+    imported = []
     if data is not None and active_form.is_valid():
         try:
             if lookup:
@@ -1830,28 +1825,16 @@ def parser_preview(request):
             active_form.add_error(None, str(exc))
         else:
             if member:
-                catalog = Premises.objects.filter(agency_id=member.agency_id)
+                imported = import_listings(member.agency_id, request.user, results)
+                by_source = {
+                    (row["publication"].source, row["publication"].source_id): row
+                    for row in imported
+                }
                 for item in results:
-                    if all(
-                        item[field] for field in ("label", "source", "source_id", "url")
-                    ):
-                        existing = existing_metrapi_card(
-                            catalog,
-                            metrapi_import_key(member.agency_id, item),
-                            item["url"],
-                        )
-                        if existing:
-                            item["existing_id"] = existing.pk
-                            continue
-                        item["token"] = signing.dumps(
-                            {
-                                "user": request.user.pk,
-                                "agency": member.agency_id,
-                                "item": item,
-                            },
-                            salt=METRAPI_IMPORT_SALT,
-                            compress=True,
-                        )
+                    saved = by_source.get((item["source"], item["source_id"]))
+                    if saved:
+                        item["premises_id"] = saved["premises"].pk
+                        item["publication_id"] = saved["publication"].pk
     return render(
         request,
         "parser.html",
@@ -1864,13 +1847,15 @@ def parser_preview(request):
             "local_showcase": settings.LEASEFIT_SHOWCASE,
             "results": results,
             "can_import": member is not None,
+            "imported_count": len({row["premises"].pk for row in imported if row["created"]}),
+            "linked_count": len({row["publication"].pk for row in imported if row["linked"]}),
+            "saved_count": len(imported),
         },
     )
 
 
 @login_required
 @require_POST
-@transaction.atomic
 def parser_import(request):
     member = parser_member(request.user)
     if member is None:
@@ -1890,67 +1875,10 @@ def parser_import(request):
     if payload["user"] != request.user.pk or payload["agency"] != member.agency_id:
         raise PermissionDenied
 
-    item = payload["item"]
-    key = metrapi_import_key(member.agency_id, item)
-    catalog = Premises.objects.select_for_update().filter(agency_id=member.agency_id)
-    existing = existing_metrapi_card(catalog, key, item["url"])
-    if existing is not None:
-        if getattr(existing, "listing", None) is None:
-            save_listing(existing, item, request.user, fill_height=True)
-        messages.info(
-            request, "Объявление уже есть в каталоге. Открыта существующая карточка."
-        )
-        return redirect("catalog_premises", object_id=existing.pk)
-    source = source_name(item)
-    p, created = catalog.get_or_create(
-        creation_key=key,
-        defaults={
-            "agency_id": member.agency_id,
-            "label": item["label"],
-            "city": item["city"],
-            "district": item["district"],
-            "listing_url": item["url"],
-            "premises_type": item["premises_type"],
-            "area": item["area"],
-            "floor": item["floor"],
-            "rent": item["rent"],
-            "rate": item["rate"],
-            "deposit": item["deposit"],
-            "commission": item["commission"],
-            "vat_mode": item["vat_mode"],
-            "commercial_source_type": "listing",
-            "commercial_source": source,
-            "commercial_date": item["date"],
-            "commercial_status": "unverified",
-        },
-    )
-    if created:
-        save_listing(p, item, request.user)
-        for characteristic in Characteristic.objects.filter(
-            code__in=item["facts"], agency__isnull=True
-        ):
-            Observation.objects.create(
-                premises=p,
-                characteristic=characteristic,
-                name=characteristic.label,
-                unit=characteristic.unit,
-                source_type="listing",
-                source=source,
-                source_url=item["url"],
-                observed_on=item["date"],
-                status="unverified",
-                author=request.user,
-                **item["facts"][characteristic.code],
-            )
-        audit(request.user, "premises.metrapi_imported", p.pk)
-        messages.success(
-            request, "Карточка добавлена. Данные объявления требуют подтверждения."
-        )
-    else:
-        messages.info(
-            request, "Объявление уже есть в каталоге. Открыта существующая карточка."
-        )
-    return redirect("catalog_premises", object_id=p.pk)
+    rows = import_listings(member.agency_id, request.user, [payload["item"]])
+    if not rows:
+        return redirect("parser")
+    return redirect("catalog_premises", object_id=rows[0]["premises"].pk)
 
 
 @workspace
@@ -1961,26 +1889,56 @@ def refresh_premises_listing(request, object_id, pk=None):
     reference = premises_listing_reference(p)
     if reference is None:
         raise Http404
+    publication = p.publications.filter(source=reference[0], source_id=reference[1]).first()
     try:
         item = find_rental(reference)
+    except ListingUnavailable as exc:
+        if publication:
+            refresh_publication(publication.pk, publication.checked_at, None, request.user)
+        messages.warning(request, str(exc))
+        return property_redirect(req, p)
     except MetrapiError as exc:
         messages.error(request, str(exc))
         return property_redirect(req, p)
-    with transaction.atomic():
-        req, p = property_load(request, pk, object_id, write=True, lock=True)
-        if premises_listing_reference(p) != reference:
-            messages.warning(
-                request, "Источник объявления изменился. Повторите обновление."
-            )
-            return property_redirect(req, p)
-        changed = save_listing(p, item, request.user, fill_height=True)
-        if changed:
-            audit(request.user, "premises.metrapi_listing_updated", p.pk)
+    if publication:
+        changed = refresh_publication(publication.pk, publication.checked_at, item, request.user)
+    else:
+        changed = bool(import_listings(request.member.agency_id, request.user, [item], target_id=p.pk))
     messages.success(
         request,
         "Материалы объявления обновлены." if changed else "Материалы объявления актуальны.",
     )
     return property_redirect(req, p)
+
+
+@workspace
+@require_GET
+def publication_history(request, object_id, publication_id):
+    p = get_object_or_404(catalog_scope(request), pk=object_id)
+    publication = get_object_or_404(p.publications, pk=publication_id)
+    page = Paginator(publication.versions.all(), 12).get_page(request.GET.get("page"))
+    facts = dict(
+        Characteristic.objects.filter(agency__isnull=True).values_list("code", "label")
+    )
+    versions = []
+    for version in page:
+        snapshot = version.snapshot
+        rows = [
+            (label, display_value(snapshot[key]))
+            for key, label in SNAPSHOT_FIELDS.items()
+            if key not in {"state", "description", "photos", "facts", "url", "group_id", "group_spread_m"}
+            and snapshot.get(key) not in {None, "", "unknown"}
+        ]
+        for code, fact in (snapshot.get("facts") or {}).items():
+            if code in {"area_sqm", "floor"}:
+                continue
+            value = fact.get("value", fact.get("text", fact.get("boolean")))
+            rows.append((facts.get(code, code), value))
+        versions.append({"entry": version, "fields": rows})
+    return render(request, "publication_history.html", {
+        "section": "all_premises", "p": p, "publication": publication,
+        "title": publication_label(publication), "page": page, "versions": versions,
+    })
 
 
 @workspace

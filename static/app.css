@@ -1950,3 +1950,58 @@ button.district-tag:hover {
 .listing-viewer img[hidden] {
   display: none;
 }
+
+.premises-id {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.listing-conflicts {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid #ead09f;
+  border-radius: 0.7rem;
+  background: #fff7e8;
+}
+
+.listing-conflicts h3,
+.listing-conflicts dl {
+  margin: 0;
+}
+
+.listing-conflicts dt {
+  margin-top: 0.65rem;
+  font-weight: 650;
+}
+
+.listing-conflicts dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+}
+
+.listing-source-list {
+  list-style: none;
+  padding: 0;
+}
+
+.listing-source-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.8rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.publication-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.6rem 1rem;
+}
+
+.publication-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

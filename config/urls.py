@@ -51,6 +51,11 @@ urlpatterns = [
         name="catalog_listing_refresh",
     ),
     path(
+        "app/premises/<int:object_id>/publications/<int:publication_id>",
+        v.publication_history,
+        name="publication_history",
+    ),
+    path(
         "app/premises/<int:object_id>/delete",
         v.delete_premises,
         name="delete_premises",

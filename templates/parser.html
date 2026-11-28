@@ -2,7 +2,6 @@
 {% load leasefit_tags %}
 {% block content %}
   <h1>Парсинг объявлений</h1>
-  <p>Поиск коммерческой аренды в базе Metrapi. Проверьте данные и выберите объявление для каталога агентства.</p>
   {% if not configured %}
     <p class="hint">
       Для поиска добавьте <code>METRAPI_API_KEY</code>
@@ -36,8 +35,9 @@
     {% if results and not can_import %}
       <p class="hint">Для импорта необходимо активное агентство.</p>
     {% endif %}
-    {% if results %}
-      <p class="hint">В карточку попадут распознанные значения. Система пометит их как сведения из объявления, которые требуют подтверждения.</p>
+    {% if results and can_import %}
+      <p class="notice">Новых помещений — {{ imported_count }}. Публикаций привязано к существующим карточкам — {{ linked_count }}. Обработано — {{ saved_count }}.</p>
+      {% if saved_count < results|length %}<p class="hint">У части результатов площадка не передала данные для однозначного импорта.</p>{% endif %}
     {% endif %}
     <div class="request-grid">
       {% for item in results %}
@@ -84,14 +84,9 @@
               <dd>{{ item.lease_type }} {{ item.heating }} {{ item.parking }} {{ item.commercial_layout }} {{ item.commercial_building_type }}</dd>
             {% endif %}
           </dl>
-          {% if item.existing_id %}
-            <a class="button secondary" href="{% url 'catalog_premises' item.existing_id %}">Открыть карточку в каталоге</a>
-          {% elif item.token %}
-            <form method="post" action="{% url 'parser_import' %}">
-              {% csrf_token %}
-              <input type="hidden" name="listing" value="{{ item.token }}">
-              <button>Добавить в каталог</button>
-            </form>
+          {% if item.premises_id %}
+            <a class="button secondary" href="{% url 'catalog_premises' item.premises_id %}">Открыть карточку в каталоге · №{{ item.premises_id }}</a>
+            <small>Публикация №{{ item.publication_id }}</small>
           {% endif %}
         </article>
       {% empty %}

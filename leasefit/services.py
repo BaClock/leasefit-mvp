@@ -333,16 +333,22 @@ def economics(p, request_obj=None, *, context=LOAD_LINK):
     missing = []
     monthly = []
     calculated = p.rate * p.area if p.rate is not None and p.area is not None else None
-    conflict = (
+    calculation_conflict = (
         p.rent is not None
         and calculated is not None
         and abs(p.rent - calculated) > Decimal(".01")
     )
+    listing_conflict = p.commercial_status != "confirmed" and any(
+        row["key"] in {"rent", "rate", "area", "vat_mode"} for row in p.listing_conflicts
+    )
+    conflict = calculation_conflict or listing_conflict
     base = p.rent if p.rent is not None else calculated
     if base is None:
         missing.append("Базовая аренда / площадь для ставки")
-    if conflict:
+    if calculation_conflict:
         missing.append("Конфликт месячной аренды и ставки × площади")
+    if listing_conflict:
+        missing.append("Площадки указывают разные условия аренды")
     if p.commercial_status == "conflict":
         missing.append("Противоречивые коммерческие условия")
     monthly.append(("Базовая аренда", base))

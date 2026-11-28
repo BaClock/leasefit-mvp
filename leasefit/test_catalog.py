@@ -579,7 +579,7 @@ class CatalogMigrationTests(TransactionTestCase):
     """Exercise the actual historical 0004 schema, including binary payloads."""
 
     migrate_from = [("leasefit", "0004_clientrequest_report_parameters_and_more")]
-    migrate_to = [("leasefit", "0010_clientrequest_districts")]
+    migrate_to = [("leasefit", "0012_listing_publication_history")]
 
     def test_legacy_ids_values_history_and_files_survive(self):
         executor = MigrationExecutor(connection)

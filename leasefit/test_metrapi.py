@@ -1,24 +1,30 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core import signing
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from .metrapi import preview_item
+from .metrapi import ListingUnavailable, MetrapiError, preview_item
 from .models import (
     Agency,
     Characteristic,
     ClientRequest,
+    ListingPublication,
+    ListingPublicationVersion,
     Membership,
     Observation,
     Premises,
     RequestPremises,
     Requirement,
 )
-from .services import check_requirement
+from .services import check_requirement, economics
 
 
 LISTING = {
@@ -72,19 +78,18 @@ class MetrapiTests(TestCase):
     def test_import_preserves_source_financial_units_and_agency(self, conn):
         conn.return_value.getresponse.return_value = api_response({"items": [LISTING]})
         response = self.client.post("/app/parser", self.search)
-        self.assertContains(response, "Добавить в каталог")
+        self.assertContains(response, "Открыть карточку в каталоге")
         self.assertNotContains(response, "CONTACT-NOT-FOR-IMPORT")
         conn.assert_called_once_with("api.metrapi.ru", timeout=10)
         request = conn.return_value.request.call_args
         self.assertEqual(request.kwargs["headers"]["X-Api-Key"], "mock-key")
         self.assertNotIn("Connection", request.kwargs["headers"])
         self.assertIn("realty_type=commercial&deal_type=rent", request.args[1])
-        token = response.context["results"][0]["token"]
-        self.assertFalse(Premises.objects.exists())
-        self.assertEqual(
-            self.client.post("/app/parser/import", {"listing": token}).status_code, 302
-        )
         p = Premises.objects.get()
+        publication = p.publications.get()
+        self.assertEqual(response.context["results"][0]["premises_id"], p.pk)
+        self.assertEqual((publication.source, publication.source_id), ("avito", "12345"))
+        self.assertEqual(publication.versions.count(), 1)
         self.assertEqual(p.agency, self.agency)
         self.assertEqual((p.city, p.district), ("Новосибирск", "Центральный"))
         self.assertFalse(p.location_confirmed)
@@ -113,12 +118,18 @@ class MetrapiTests(TestCase):
         )
         p.label = "Название после проверки"
         p.save()
-        self.client.post("/app/parser/import", {"listing": token})
+        conn.return_value.getresponse.return_value = api_response({"items": [LISTING]})
+        self.client.post("/app/parser", self.search)
         p.refresh_from_db()
         self.assertEqual(p.label, "Название после проверки")
         self.assertEqual(Premises.objects.count(), 1)
         self.assertEqual(Observation.objects.count(), 4)
+        self.assertEqual(publication.versions.count(), 1)
 
+        token = signing.dumps(
+            {"user": self.manager.pk, "agency": self.agency.pk, "item": preview_item(LISTING)},
+            salt="leasefit.metrapi.import",
+        )
         other = Agency.objects.create(name="Agency B")
         self.client.force_login(self.create_user("foreign-manager", other, "manager"))
         self.assertEqual(
@@ -129,7 +140,7 @@ class MetrapiTests(TestCase):
         self.assertEqual(
             self.client.post("/app/parser/import", {"listing": token}).status_code, 403
         )
-        self.assertEqual(conn.return_value.request.call_count, 1)
+        self.assertEqual(conn.return_value.request.call_count, 2)
 
     @patch("leasefit.metrapi.HTTPSConnection")
     def test_rate_limit_and_invalid_import_do_not_create_properties(self, conn):
@@ -154,7 +165,7 @@ class MetrapiTests(TestCase):
         replies = conn.return_value.getresponse
         replies.side_effect = [throttle(), api_response({"items": [LISTING]})]
         response = self.client.post("/app/parser", self.search)
-        self.assertContains(response, "Добавить в каталог")
+        self.assertContains(response, "Открыть карточку в каталоге")
         requests = conn.return_value.request.call_args_list
         self.assertEqual(len(requests), 2)
         self.assertEqual(requests[0], requests[1])
@@ -217,10 +228,6 @@ class MetrapiTests(TestCase):
         self.assertEqual(
             conn.return_value.request.call_args.args,
             ("GET", "/v1/item/avito/12345"),
-        )
-        token = response.context["results"][0]["token"]
-        self.assertEqual(
-            self.client.post("/app/parser/import", {"listing": token}).status_code, 302
         )
         p = Premises.objects.get()
         power = p.observations.get(characteristic__code="power_kw")
@@ -315,8 +322,6 @@ class MetrapiTests(TestCase):
         conn.return_value.getresponse.return_value = api_response({"items": [item]})
         preview = self.client.post("/app/parser", self.search)
         self.assertContains(preview, "из описания, требует подтверждения")
-        token = preview.context["results"][0]["token"]
-        self.client.post("/app/parser/import", {"listing": token})
         p = Premises.objects.get()
         self.assertEqual(p.listing.photos, [PHOTO])
         self.assertEqual(p.listing.description, LISTING_DESCRIPTION)
@@ -339,6 +344,130 @@ class MetrapiTests(TestCase):
             self.assertTrue(height_entry["primary"])
         self.client.force_login(self.create_user("foreign", Agency.objects.create(name="Other"), "manager"))
         self.assertEqual(self.client.get(reverse("catalog_premises", args=[p.pk])).status_code, 404)
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_group_import_links_sources_fills_missing_values_and_marks_conflicts(self, conn):
+        first = {**LISTING, "group_id": "g-101", "group_spread_m": 12, "photos": [PHOTO]}
+        second = {
+            **first, "source": "cian", "source_id": "22345", "group_spread_m": 12,
+            "url": "https://www.cian.ru/rent/commercial/22345/",
+            "price": 120000, "price_unit": None, "price_period": "в месяц",
+            "ceiling_height": "4.20", "commission": "4 000 руб.",
+            "photos": ["https://images.cdn-cian.ru/picture.jpg"],
+        }
+        conn.return_value.getresponse.return_value = api_response({"items": [first, second]})
+        response = self.client.post("/app/parser", self.search)
+        self.assertContains(response, "Новых помещений — 1")
+        self.assertNotContains(response, "Проверьте данные и выберите объявление")
+        p = Premises.objects.get()
+        self.assertEqual(p.commission, 4000)
+        self.assertEqual(len(p.listing.photos), 2)
+        self.assertEqual(p.publications.count(), 2)
+        self.assertEqual(ListingPublicationVersion.objects.count(), 2)
+        self.assertEqual(
+            {row["key"] for row in p.listing_conflicts}, {"rent", "ceiling_height_m"},
+        )
+        self.assertTrue(economics(p)["rent_conflict"])
+        card = self.client.get(reverse("catalog_premises", args=[p.pk]))
+        self.assertContains(card, "Требует уточнения")
+        self.assertContains(card, "История версий", count=2)
+        self.assertContains(card, "120000.00")
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_unreliable_group_keeps_separate_cards_and_agencies(self, conn):
+        first = {**LISTING, "group_id": "g", "group_spread_m": 125}
+        second = {
+            **first, "source": "cian", "source_id": "777",
+            "url": "https://www.cian.ru/rent/commercial/777/",
+        }
+        conn.return_value.getresponse.return_value = api_response({"items": [first, second]})
+        self.client.post("/app/parser", self.search)
+        self.assertEqual(Premises.objects.count(), 2)
+        other = Agency.objects.create(name="Другой каталог")
+        self.client.force_login(self.create_user("other-catalog", other, "manager"))
+        conn.return_value.getresponse.return_value = api_response({"items": [first]})
+        self.client.post("/app/parser", self.search)
+        self.assertEqual(Premises.objects.filter(agency=other).count(), 1)
+        origin = ListingPublication.objects.filter(agency=self.agency).first()
+        url = reverse("publication_history", args=[origin.premises_id, origin.pk])
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_each_meaningful_change_creates_a_version_and_preserves_manual_updates(self, conn):
+        first = {**LISTING, "price": 80000, "price_unit": None, "price_period": "в месяц"}
+        conn.return_value.getresponse.return_value = api_response({"items": [first]})
+        self.client.post("/app/parser", self.search)
+        p = Premises.objects.get()
+        pub = p.publications.get()
+        date_only = {**first, "updated_at": "2026-01-02T09:00:00+07:00"}
+        conn.return_value.getresponse.return_value = api_response({"items": [date_only]})
+        self.client.post("/app/parser", self.search)
+        self.assertEqual(pub.versions.count(), 1)
+        updated = {**first, "price": 85000}
+        conn.return_value.getresponse.return_value = api_response({"items": [updated]})
+        self.client.post("/app/parser", self.search)
+        p.refresh_from_db()
+        self.assertEqual(p.rent, 85000)
+        p.rent = 91000
+        p.save(update_fields=["rent"])
+        conn.return_value.getresponse.return_value = api_response({"items": [{**updated, "price": 87000}]})
+        self.client.post("/app/parser", self.search)
+        p.refresh_from_db()
+        self.assertEqual(p.rent, 91000)
+        self.assertEqual(
+            list(pub.versions.values_list("snapshot__rent", flat=True)),
+            ["87000.00", "85000.00", "80000.00"],
+        )
+        response = self.client.get(reverse("publication_history", args=[p.pk, pub.pk]))
+        self.assertContains(response, "Версия 1")
+        self.assertContains(response, "Версия 3")
+
+    @patch("leasefit.management.commands.refresh_metrapi_listings.find_rental")
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_periodic_recheck_passes_through_temporary_failure_and_records_removal(self, conn, find):
+        conn.return_value.getresponse.return_value = api_response({"items": [LISTING]})
+        self.client.post("/app/parser", self.search)
+        pub = ListingPublication.objects.get()
+        call_command("refresh_metrapi_listings", once=True, stdout=StringIO())
+        find.assert_not_called()
+        pub.next_check_at = timezone.now() - timedelta(minutes=1)
+        pub.save(update_fields=["next_check_at"])
+        find.side_effect = MetrapiError("Temporary")
+        call_command("refresh_metrapi_listings", once=True, stdout=StringIO(), stderr=StringIO())
+        pub.refresh_from_db()
+        self.assertGreater(pub.next_check_at, timezone.now())
+        self.assertEqual(pub.version, 1)
+        pub.next_check_at = timezone.now() - timedelta(minutes=1)
+        pub.save(update_fields=["next_check_at"])
+        find.side_effect = ListingUnavailable("Missing")
+        call_command("refresh_metrapi_listings", once=True, stdout=StringIO())
+        pub.refresh_from_db()
+        self.assertEqual(pub.version, 2)
+        self.assertEqual(pub.snapshot["state"], "unavailable")
+        self.assertEqual(pub.versions.get(number=1).snapshot["state"], "active")
+        self.assertTrue(Premises.objects.filter(pk=pub.premises_id).exists())
+        pub.next_check_at = timezone.now() - timedelta(minutes=1)
+        pub.save(update_fields=["next_check_at"])
+        find.side_effect = None
+        find.return_value = preview_item(LISTING)
+        call_command("refresh_metrapi_listings", once=True, stdout=StringIO())
+        pub.refresh_from_db()
+        self.assertEqual(pub.version, 3)
+        self.assertEqual(pub.snapshot["state"], "active")
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_refresh_switches_automatically_managed_price_basis(self, conn):
+        conn.return_value.getresponse.return_value = api_response({"items": [LISTING]})
+        self.client.post("/app/parser", self.search)
+        p = Premises.objects.get()
+        self.assertEqual(p.rate, 1500)
+        conn.return_value.getresponse.return_value = api_response({
+            "items": [{**LISTING, "price": 95000, "price_unit": None, "price_period": "в месяц"}]
+        })
+        self.client.post("/app/parser", self.search)
+        p.refresh_from_db()
+        self.assertEqual(p.rent, 95000)
+        self.assertIsNone(p.rate)
 
     @patch("leasefit.metrapi.HTTPSConnection")
     def test_refresh_existing_listing_preserves_confirmed_height_and_card(self, conn):
