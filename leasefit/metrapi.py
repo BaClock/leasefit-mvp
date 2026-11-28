@@ -67,6 +67,7 @@ PURPOSES = {
     "free_purpose": "other",
 }
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+SEARCH_PAGE_SIZE = 50
 MAX_SHORT_RETRY_SECONDS = 3
 MAX_LISTING_DESCRIPTION = 32000
 MAX_LISTING_PHOTOS = 80
@@ -98,13 +99,15 @@ class ListingUnavailable(MetrapiError):
     pass
 
 
-def search_rentals(*, locality, query="", area_min=None, area_max=None, limit=10):
+def search_rentals(*, locality, query="", area_min=None, area_max=None, cursor=None):
     params = {
         "locality": locality,
         "realty_type": "commercial",
         "deal_type": "rent",
-        "limit": limit,
+        "limit": SEARCH_PAGE_SIZE,
     }
+    if cursor is not None:
+        params["cursor"] = cursor
     if query:
         params["q"] = query
     for name, value in (("area_min", area_min), ("area_max", area_max)):
@@ -114,7 +117,14 @@ def search_rentals(*, locality, query="", area_min=None, area_max=None, limit=10
     items = payload.get("items")
     if not isinstance(items, list):
         raise MetrapiError("Metrapi вернул ответ без списка объявлений.")
-    return [preview_item(item) for item in items[:limit] if is_commercial_rental(item)]
+    next_cursor = payload.get("next_cursor")
+    if next_cursor is not None and (
+        not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor
+    ):
+        raise MetrapiError("Metrapi не указал следующую страницу. Повторите запрос.")
+    return [
+        preview_item(item) for item in items if is_commercial_rental(item)
+    ], next_cursor
 
 
 def is_commercial_rental(item):

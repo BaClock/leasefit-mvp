@@ -30,14 +30,35 @@
       </form>
     </details>
   </section>
+  <div id="parser-progress">
+    {% if results != None or continuation %}
+      <h2>Найдено за поиск: {{ search.found }}</h2>
+      {% if search.found and can_import %}
+        <p class="notice">Новых помещений — {{ search.created }}. Публикаций привязано к существующим карточкам — {{ search.linked }}. Обработано — {{ search.saved }}.</p>
+        {% if search.saved < search.found %}<p class="hint">У части результатов площадка не передала данные для однозначного импорта.</p>{% endif %}
+      {% endif %}
+    {% endif %}
+    {% if continuation %}
+      <form method="post" action="{% url 'parser' %}#parser-progress"{% if auto_continue %} data-parser-continue{% endif %}>
+        {% csrf_token %}
+        <input type="hidden" name="continuation" value="{{ continuation }}">
+        <p class="hint" data-parser-progress aria-live="polite">
+          {% if auto_continue %}
+            Есть следующая страница.
+          {% else %}
+            Поиск приостановлен. Продолжите с той же страницы.
+          {% endif %}
+        </p>
+        {% if not auto_continue %}{{ form.non_field_errors }}{% endif %}
+        <button>Продолжить поиск</button>
+        <button type="button" class="secondary" data-parser-pause hidden>Приостановить</button>
+      </form>
+    {% endif %}
+  </div>
   {% if results != None %}
-    <h2>Найдено в выборке: {{ results|length }}</h2>
+    {% if not lookup %}<h3>На этой странице: {{ results|length }}</h3>{% endif %}
     {% if results and not can_import %}
       <p class="hint">Для импорта необходимо активное агентство.</p>
-    {% endif %}
-    {% if results and can_import %}
-      <p class="notice">Новых помещений — {{ imported_count }}. Публикаций привязано к существующим карточкам — {{ linked_count }}. Обработано — {{ saved_count }}.</p>
-      {% if saved_count < results|length %}<p class="hint">У части результатов площадка не передала данные для однозначного импорта.</p>{% endif %}
     {% endif %}
     <div class="request-grid">
       {% for item in results %}
@@ -94,7 +115,11 @@
           {% endif %}
         </article>
       {% empty %}
-        <p>В этой выборке нет помещений. Попробуйте изменить город или фильтры.</p>
+        {% if continuation or search.found %}
+          <p>На этой странице нет подходящих помещений.</p>
+        {% else %}
+          <p>В этой выборке нет помещений. Попробуйте изменить город или фильтры.</p>
+        {% endif %}
       {% endfor %}
     </div>
   {% endif %}

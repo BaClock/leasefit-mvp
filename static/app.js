@@ -297,6 +297,25 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  const form = document.querySelector("[data-parser-continue]");
+  if (!form) return;
+  const progress = form.querySelector("[data-parser-progress]");
+  const pause = form.querySelector("[data-parser-pause]");
+  const timer = window.setTimeout(() => form.requestSubmit(), 2100);
+  progress.textContent = "Загружается следующая страница…";
+  pause.hidden = false;
+  pause.addEventListener("click", () => {
+    window.clearTimeout(timer);
+    progress.textContent = "Поиск приостановлен. Можно продолжить с этой страницы.";
+    pause.hidden = true;
+  });
+  document.addEventListener("submit", () => window.clearTimeout(timer), {
+    once: true,
+    capture: true,
+  });
+});
+
+document.addEventListener("DOMContentLoaded", () => {
   for (const schedule of document.querySelectorAll("[data-weekly-schedule]")) {
     const mode = schedule.querySelector("[data-schedule-mode]");
     const sync = () => {

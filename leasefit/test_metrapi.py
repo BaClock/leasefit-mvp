@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from django.contrib.auth.models import User
@@ -70,7 +71,7 @@ class MetrapiTests(TestCase):
         self.agency = Agency.objects.create(name="Agency A")
         self.manager = self.create_user("manager", self.agency, "manager")
         self.client.force_login(self.manager)
-        self.search = {"locality": "Новосибирск", "limit": 5}
+        self.search = {"locality": "Новосибирск"}
 
     def create_user(self, name, agency, role):
         user = User.objects.create_user(name)
@@ -144,6 +145,55 @@ class MetrapiTests(TestCase):
             self.client.post("/app/parser/import", {"listing": token}).status_code, 403
         )
         self.assertEqual(conn.return_value.request.call_count, 2)
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_search_imports_more_than_twenty_and_resumes_after_quota_error(self, conn):
+        items = [
+            {
+                **LISTING,
+                "source_id": str(20000 + index),
+                "url": f"https://www.avito.ru/commercial/{20000 + index}",
+                "address": f"Новосибирск, Учебная улица, {index + 1}",
+            }
+            for index in range(22)
+        ]
+        cursor = "next/cursor+one="
+        conn.return_value.getresponse.side_effect = [
+            api_response({"items": items[:21], "next_cursor": cursor}),
+            api_response({"detail": "daily limit exceeded"}, status=429),
+            api_response({"items": items[21:], "next_cursor": None}),
+        ]
+        first = self.client.post("/app/parser", {**self.search, "area_min": "50.00"})
+        self.assertContains(first, "Найдено за поиск: 21")
+        self.assertContains(first, "data-parser-continue")
+        self.assertNotContains(first, 'name="limit"')
+        self.assertEqual(ListingPublication.objects.count(), 21)
+        token = first.context["continuation"]
+
+        foreign_agency = Agency.objects.create(name="Agency B")
+        self.client.force_login(self.create_user("foreign", foreign_agency, "manager"))
+        self.assertEqual(
+            self.client.post("/app/parser", {"continuation": token}).status_code, 403
+        )
+        self.client.force_login(self.manager)
+
+        paused = self.client.post("/app/parser", {"continuation": token})
+        self.assertContains(paused, "Достигнут лимит запросов Metrapi")
+        self.assertNotContains(paused, "data-parser-continue")
+        self.assertEqual(paused.context["continuation"], token)
+        self.assertEqual(ListingPublication.objects.count(), 21)
+
+        final = self.client.post("/app/parser", {"continuation": token})
+        self.assertContains(final, "Найдено за поиск: 22")
+        self.assertContains(final, "Обработано — 22")
+        self.assertIsNone(final.context["continuation"])
+        self.assertEqual(ListingPublication.objects.count(), 22)
+        request_calls = conn.return_value.request.call_args_list
+        query = [parse_qs(urlsplit(call.args[1]).query) for call in request_calls]
+        self.assertNotIn("cursor", query[0])
+        self.assertEqual(query[0]["limit"], ["50"])
+        expected = {**query[0], "cursor": [cursor]}
+        self.assertEqual(query[1:], [expected, expected])
 
     @patch("leasefit.metrapi.HTTPSConnection")
     def test_rate_limit_and_invalid_import_do_not_create_properties(self, conn):

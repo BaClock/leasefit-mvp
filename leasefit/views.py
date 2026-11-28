@@ -1760,12 +1760,6 @@ class MetrapiSearchForm(forms.Form):
         max_digits=14,
         decimal_places=2,
     )
-    limit = forms.TypedChoiceField(
-        label="Объявлений в выдаче",
-        choices=[(5, "5"), (10, "10"), (20, "20")],
-        coerce=int,
-        initial=10,
-    )
 
     def clean(self):
         data = super().clean()
@@ -1776,6 +1770,7 @@ class MetrapiSearchForm(forms.Form):
 
 
 METRAPI_IMPORT_SALT = "leasefit.metrapi.import"
+METRAPI_SEARCH_SALT = "leasefit.metrapi.search"
 
 
 class MetrapiListingForm(forms.Form):
@@ -1808,22 +1803,57 @@ def parser_preview(request):
     member = parser_member(request.user)
     data = request.POST if request.method == "POST" else None
     lookup = data is not None and data.get("mode") == "listing"
-    form = MetrapiSearchForm(None if lookup else data)
+    continuation = data.get("continuation") if data is not None and not lookup else None
+    search = {
+        "user": request.user.pk,
+        "agency": member.agency_id if member else None,
+        "cursor": None,
+        "found": 0,
+        "saved": 0,
+        "created": 0,
+        "linked": 0,
+    }
+    search_data = data
+    if continuation:
+        try:
+            search = signing.loads(
+                continuation, salt=METRAPI_SEARCH_SALT, max_age=48 * 60 * 60
+            )
+        except signing.BadSignature:
+            messages.error(request, "Срок продолжения поиска истёк. Начните поиск снова.")
+            return redirect("parser")
+        if search["user"] != request.user.pk or search["agency"] != (
+            member.agency_id if member else None
+        ):
+            raise PermissionDenied
+        search_data = search["filters"]
+    form = MetrapiSearchForm(None if lookup else search_data)
     listing_form = MetrapiListingForm(data if lookup else None)
     active_form = listing_form if lookup else form
     results = None
-    imported = []
+    auto_continue = False
     if data is not None and active_form.is_valid():
         try:
             if lookup:
                 results = [find_rental(listing_form.cleaned_data["url"])]
+                next_cursor = None
             else:
-                results = search_rentals(**form.cleaned_data)
+                results, next_cursor = search_rentals(
+                    **form.cleaned_data, cursor=search["cursor"]
+                )
         except MetrapiError as exc:
             active_form.add_error(None, str(exc))
         else:
+            search["found"] += len(results)
             if member:
                 imported = import_listings(member.agency_id, request.user, results)
+                search["created"] += len(
+                    {row["premises"].pk for row in imported if row["created"]}
+                )
+                search["linked"] += len(
+                    {row["publication"].pk for row in imported if row["linked"]}
+                )
+                search["saved"] += len(imported)
                 by_source = {
                     (row["publication"].source, row["publication"].source_id): row
                     for row in imported
@@ -1833,6 +1863,16 @@ def parser_preview(request):
                     if saved:
                         item["premises_id"] = saved["premises"].pk
                         item["publication_id"] = saved["publication"].pk
+            continuation = None
+            if next_cursor is not None:
+                search["cursor"] = next_cursor
+                search["filters"] = {
+                    key: str(value)
+                    for key, value in form.cleaned_data.items()
+                    if value is not None
+                }
+                continuation = signing.dumps(search, salt=METRAPI_SEARCH_SALT)
+                auto_continue = True
     return render(
         request,
         "parser.html",
@@ -1845,9 +1885,9 @@ def parser_preview(request):
             "local_showcase": settings.LEASEFIT_SHOWCASE,
             "results": results,
             "can_import": member is not None,
-            "imported_count": len({row["premises"].pk for row in imported if row["created"]}),
-            "linked_count": len({row["publication"].pk for row in imported if row["linked"]}),
-            "saved_count": len(imported),
+            "search": search,
+            "continuation": continuation,
+            "auto_continue": auto_continue,
         },
     )
 
