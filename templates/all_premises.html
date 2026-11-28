@@ -16,4 +16,11 @@
   </div>
   {% include "catalog_filters.html" %}
   {% include "premises_cards.html" %}
+  {% if page.has_other_pages %}
+    <nav class="actions" aria-label="Страницы каталога">
+      {% if page.has_previous %}<a href="?{% if filter_params %}{{ filter_params }}&amp;{% endif %}page={{ page.previous_page_number }}">← Предыдущая</a>{% endif %}
+      <span>Страница {{ page.number }} из {{ page.paginator.num_pages }} · {{ page.paginator.count }} помещений</span>
+      {% if page.has_next %}<a href="?{% if filter_params %}{{ filter_params }}&amp;{% endif %}page={{ page.next_page_number }}">Следующая →</a>{% endif %}
+    </nav>
+  {% endif %}
 {% endblock %}

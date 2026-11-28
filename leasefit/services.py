@@ -104,7 +104,7 @@ def normalized_text(code, value):
     return value
 
 
-def check_requirement(req, p, *, observations=None):
+def check_requirement(req, p, *, observations=None, preliminary=False):
     if observations is None:
         observations = list(
             p.observations.filter(characteristic_id=req.characteristic_id).order_by(
@@ -113,7 +113,7 @@ def check_requirement(req, p, *, observations=None):
         )
     kind = req.characteristic.value_type
     if kind in STRUCTURED:
-        return check_structured_requirement(req, observations)
+        return check_structured_requirement(req, observations, preliminary=preliminary)
     live = [o for o in observations if not o.superseded]
     sources = [source_snapshot(o) for o in observations]
     reason = "Нет актуального подтверждённого значения для помещения."
@@ -122,6 +122,8 @@ def check_requirement(req, p, *, observations=None):
     comparable = [
         o for o in live if o.scope == "premises" and o.source_type != "archive"
     ]
+    if preliminary and any(verified(o) for o in comparable):
+        comparable = [o for o in comparable if o.source_type != "listing"]
     values = {
         (
             (
@@ -138,7 +140,7 @@ def check_requirement(req, p, *, observations=None):
             else o.boolean is not None if kind == "boolean" else bool(o.text.strip())
         )
     }
-    conflict = any(o.status == "conflict" for o in live) or len(values) > 1
+    conflict = any(o.status == "conflict" for o in (comparable if preliminary else live)) or len(values) > 1
     invalid_rule = (
         req.operator not in req.characteristic.allowed_operators
         or (kind == "text" and not req.expected_text)
@@ -158,9 +160,7 @@ def check_requirement(req, p, *, observations=None):
         confirmed = [
             o
             for o in comparable
-            if o.status == "confirmed"
-            and o.source_type != "listing"
-            and o.confirmation
+            if (verified(o) or preliminary and o.source_type == "listing" and o.status == "unverified")
             and o.unit == req.unit == req.characteristic.unit
             and (
                 o.value is not None
@@ -204,6 +204,8 @@ def check_requirement(req, p, *, observations=None):
                 if good
                 else "Подтверждённое значение не соответствует требованию."
             )
+            if o.source_type == "listing":
+                reason = "По объявлению значение соответствует требованию." if good else "По объявлению значение ниже требования или не соответствует ему."
             if not good and kind == "number":
                 ceiling = req.maximum if req.operator == "range" else req.minimum
                 if req.operator in ("gte", "range", "eq") and o.value < req.minimum:
@@ -215,7 +217,11 @@ def check_requirement(req, p, *, observations=None):
     return requirement_result(req, status, reason, sources, adjustment)
 
 
-def check_structured_requirement(req, observations):
+def verified(observation):
+    return observation.status == "confirmed" and observation.source_type != "listing" and observation.confirmation
+
+
+def check_structured_requirement(req, observations, *, preliminary=False):
     kind = req.characteristic.value_type
     code = req.characteristic.code
     sources = []
@@ -246,6 +252,11 @@ def check_structured_requirement(req, observations):
         return requirement_result(
             req, "clarify", "Уточните тип сравнения или единицу в профиле.", sources
         )
+    if preliminary and any(verified(o) for o, _ in available):
+        available = [(o, value) for o, value in available if o.source_type != "listing"]
+    conflict_sources = observations
+    if preliminary and any(verified(o) for o, _ in available):
+        conflict_sources = [o for o in observations if o.source_type != "listing"]
     signatures = {
         (
             tuple(weekly_coverage(value))
@@ -255,7 +266,7 @@ def check_structured_requirement(req, observations):
         for _, value in available
     }
     if len(signatures) > 1 or any(
-        o.status == "conflict" and not o.superseded for o in observations
+        o.status == "conflict" and not o.superseded for o in conflict_sources
     ):
         return requirement_result(
             req,
@@ -265,22 +276,23 @@ def check_structured_requirement(req, observations):
         )
     for observation, value in reversed(available):
         if (
-            observation.status == "confirmed"
-            and observation.source_type != "listing"
-            and observation.confirmation
+            verified(observation)
+            or preliminary and observation.source_type == "listing" and observation.status == "unverified"
         ):
             if matches(kind, expected, value):
                 return requirement_result(
                     req,
                     "pass",
-                    "Подтверждённые условия покрывают запрос клиента.",
+                    "По объявлению условия покрывают запрос клиента."
+                    if observation.source_type == "listing" else "Подтверждённые условия покрывают запрос клиента.",
                     sources,
                 )
             status = "blocker" if req.priority == "required" else "desired_fail"
             return requirement_result(
                 req,
                 status,
-                "Подтверждённые условия не покрывают запрос клиента.",
+                "По объявлению условия не покрывают запрос клиента."
+                if observation.source_type == "listing" else "Подтверждённые условия не покрывают запрос клиента.",
                 sources,
             )
     return requirement_result(
@@ -339,7 +351,7 @@ def economics(p, request_obj=None, *, context=LOAD_LINK):
         and abs(p.rent - calculated) > Decimal(".01")
     )
     listing_conflict = p.commercial_status != "confirmed" and any(
-        row["key"] in {"rent", "rate", "area", "vat_mode"} for row in p.listing_conflicts
+        row["key"] in {"rent", "rate", "area", "area_sqm", "vat_mode"} for row in p.listing_conflicts
     )
     conflict = calculation_conflict or listing_conflict
     base = p.rent if p.rent is not None else calculated
@@ -401,6 +413,12 @@ def economics(p, request_obj=None, *, context=LOAD_LINK):
         )
     else:
         budget_label = "Полная сумма и соблюдение лимита требуют уточнения"
+    known_payment = None
+    deposit_conflict = p.commercial_status != "confirmed" and any(
+        row["key"] == "deposit" for row in p.listing_conflicts
+    )
+    if base is not None and not conflict and p.commercial_status != "conflict":
+        known_payment = base + (p.deposit if p.deposit is not None and not deposit_conflict else zero)
     others = [p.operating, p.utilities, p.other_monthly]
     allowed = None
     if (
@@ -422,6 +440,8 @@ def economics(p, request_obj=None, *, context=LOAD_LINK):
             "complete": not missing,
             "missing": missing,
             "base": base,
+            "rental_payment": known_payment,
+            "rental_deposit_unknown": p.deposit is None or deposit_conflict,
             "rent_conflict": conflict,
             "once": once,
             "once_total": once_total,
@@ -501,12 +521,12 @@ def active_requirements(req):
     ]
 
 
-def assess_requirements(p, requirements, observations):
+def assess_requirements(p, requirements, observations, *, preliminary=False):
     by_characteristic = defaultdict(list)
     for observation in observations:
         by_characteristic[observation.characteristic_id].append(observation)
     rows = [
-        check_requirement(r, p, observations=by_characteristic[r.characteristic_id])
+        check_requirement(r, p, observations=by_characteristic[r.characteristic_id], preliminary=preliminary)
         for r in requirements
     ]
     mandatory = [r for r in rows if r["priority"] == "required"]
@@ -577,8 +597,8 @@ def ranking_observations(requirements, *, extra_codes=()):
     )
 
 
-def assess_premises(req, p, requirements, observations, *, context):
-    status, rows = assess_requirements(p, requirements, observations)
+def assess_premises(req, p, requirements, observations, *, context, preliminary=False):
+    status, rows = assess_requirements(p, requirements, observations, preliminary=preliminary)
     costs = economics(p, req, context=context)
     reasons = defaultdict(list)
     for row in rows:
@@ -600,7 +620,8 @@ def assess_premises(req, p, requirements, observations, *, context):
         "p": p,
         "status": status,
         "score": score,
-        "outcome": assess_outcome(req, p, status, rows, costs, context),
+        "outcome": assess_outcome(req, p, status, rows, costs, context, preliminary=preliminary),
+        "preliminary": preliminary,
         "improvements": improvements,
         "budget_action": budget_action,
         "economics": costs,

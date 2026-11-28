@@ -117,11 +117,28 @@ def opening_limit(p, req, context, costs):
     }
 
 
-def assess_outcome(req, p, status, rows, costs, context):
+def assess_outcome(req, p, status, rows, costs, context, *, preliminary=False):
     monthly = monthly_outcome(p, req, costs)
     over = monthly["state"] == "over"
     finance_clear = monthly["state"] == "within" and monthly["confirmed"]
     start = opening_limit(p, req, context, costs)
+    if preliminary:
+        # An unknown expense cannot prove compliance. Known costs can exceed a limit.
+        finance_clear = monthly["state"] in {"within", "unset"} and costs["complete"]
+        if req.start_budget is not None:
+            startup = opening_costs(p, context)
+            start_known = startup and all(value is not None for _, value in startup)
+            if not start_known or costs["rental_deposit_unknown"]:
+                finance_clear = False
+                known = sum((value or Decimal(0) for _, value in startup), Decimal(0)) if startup else (
+                    (p.deposit or Decimal(0)) + (p.commission or Decimal(0))
+                )
+                if known > req.start_budget and not costs["rent_conflict"] and p.commercial_status != "conflict":
+                    gap = known - req.start_budget
+                    start = {
+                        "kind": "start", "title": f"Известные стартовые затраты выше бюджета на {money_text(gap)}",
+                        "difference": str(gap), "action": "Уточните стартовые затраты.",
+                    }
     finance_issues = []
     if over:
         finance_issues.append(
@@ -183,7 +200,7 @@ def assess_outcome(req, p, status, rows, costs, context):
             else "Не подходит по стартовому бюджету"
         )
     elif finance_clear:
-        group, label = "recommended", "Подходит по проверенным условиям"
+        group, label = "recommended", "Подходит по имеющимся данным" if preliminary else "Подходит по проверенным условиям"
     else:
         group, label = "finance_clarify", "Требует финансового уточнения"
     return {

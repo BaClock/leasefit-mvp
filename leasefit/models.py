@@ -3,10 +3,12 @@ from django.conf import settings
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from .listing_filters import CATEGORIES
 
 
 class Agency(models.Model):
     name = models.CharField("Агентство", max_length=160)
+    parser_paused = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name
@@ -97,6 +99,7 @@ class Characteristic(models.Model):
             ("layout", "Площадь и планировка"),
             ("engineering", "Инженерные коммуникации"),
             ("access", "Условия доступа и работы помещения"),
+            ("specialized", "Складские и производственные характеристики"),
             ("custom", "Дополнительные требования"),
         ],
     )
@@ -284,6 +287,7 @@ class Premises(models.Model):
     )
     commission = models.DecimalField("Комиссия, ₽", **money)
     listing_conflicts = models.JSONField(default=list, blank=True)
+    availability_confirmed_on = models.DateField("Помещение доступно на дату", null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     creation_key = models.UUIDField(default=uuid.uuid4, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -302,6 +306,10 @@ class PremisesListing(models.Model):
     description = models.TextField(blank=True)
     photos = models.JSONField(default=list, blank=True)
     projected = models.JSONField(default=dict, blank=True)
+    title = models.CharField(max_length=250, blank=True)
+    address = models.CharField(max_length=250, blank=True)
+    categories = models.JSONField(default=list, blank=True)
+    details = models.JSONField(default=dict, blank=True)
 
 
 class ListingPublication(models.Model):
@@ -315,6 +323,7 @@ class ListingPublication(models.Model):
     version = models.PositiveIntegerField(default=0)
     snapshot = models.JSONField(default=dict)
     checked_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
     next_check_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
@@ -343,6 +352,37 @@ class ListingPublicationVersion(models.Model):
                 fields=["publication", "number"], name="unique_listing_publication_version"
             )
         ]
+
+
+class ParserConfiguration(models.Model):
+    agency = models.ForeignKey(Agency, on_delete=models.CASCADE, related_name="parser_configurations")
+    category = models.CharField(max_length=20, choices=CATEGORIES)
+    enabled = models.BooleanField(default=True)
+    interval_minutes = models.PositiveIntegerField(default=60)
+    offset_minutes = models.PositiveIntegerField(default=0)
+    filters = models.JSONField(default=dict, blank=True)
+    priority = models.PositiveIntegerField(default=10)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(db_index=True)
+    cursor = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["agency", "category"], name="unique_agency_parser_category")]
+
+
+class ParserRun(models.Model):
+    STATUSES = [
+        ("running", "Выполняется"), ("complete", "Завершено"), ("partial", "Частичная загрузка"),
+        ("error", "Ошибка API"), ("quota", "Достигнут лимит запросов"),
+    ]
+    configuration = models.ForeignKey(ParserConfiguration, on_delete=models.CASCADE, related_name="runs")
+    status = models.CharField(max_length=12, choices=STATUSES, default="running")
+    scheduled_at = models.DateTimeField()
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    stats = models.JSONField(default=dict, blank=True)
+    error = models.CharField(max_length=350, blank=True)
 
 
 class RequestPremises(models.Model):

@@ -1,0 +1,58 @@
+{% load tz %}
+{% timezone schedule_zone %}
+<section class="panel" id="parser-schedule">
+  <h2>Расписание и категории</h2>
+  <dl class="recommendation-summary">
+    <div><dt>Источник</dt><dd>Metrapi</dd></div>
+    <div><dt>Подключение</dt><dd>{% if schedule_success %}Есть успешная синхронизация{% elif configured %}Ключ настроен{% else %}Ключ не настроен{% endif %}</dd></div>
+    <div><dt>Автоматический поиск</dt><dd>{% if schedule_next and configured %}Включён{% elif schedule_paused %}Приостановлен{% else %}Выключен{% endif %}</dd></div>
+    <div><dt>Категорий</dt><dd>{{ schedule|length }}</dd></div>
+    <div><dt>Последняя синхронизация</dt><dd>{{ schedule_success|date:"d.m H:i"|default:"—" }}</dd></div>
+    <div><dt>Следующая задача</dt><dd>{{ schedule_next|date:"d.m H:i"|default:"—" }}</dd></div>
+  </dl>
+  <form method="post" action="{% url 'parser_schedule' %}" class="actions">
+    {% csrf_token %}
+    <button name="action" value="run"{% if not configured or not schedule_next %} disabled{% endif %}>Обновить сейчас</button>
+    {% if schedule_paused %}<button name="action" value="resume" class="secondary">Возобновить парсинг</button>
+    {% else %}<button name="action" value="pause" class="secondary">Приостановить парсинг</button>{% endif %}
+  </form>
+  <p class="hint">Время Новосибирска. Частичная загрузка продолжится с последней сохранённой страницы.</p>
+  <div class="table-scroll" tabindex="0">
+    <table>
+      <thead><tr><th scope="col">Категория</th><th scope="col">Статус</th><th scope="col">Последний запуск</th><th scope="col">Следующий запуск</th><th scope="col">Новых</th><th scope="col">Обновлено</th></tr></thead>
+      <tbody>
+        {% for row in schedule %}
+        <tr>
+          <th scope="row"><a href="#schedule-{{ row.config.pk }}">{{ row.config.get_category_display }}</a></th>
+          <td>{{ row.status }}</td>
+          <td>{{ row.config.last_run_at|date:"d.m H:i"|default:"—" }}</td>
+          <td>{% if row.config.enabled and not schedule_paused and configured %}{{ row.config.next_run_at|date:"d.m H:i" }}{% else %}—{% endif %}</td>
+          <td>{{ row.run.stats.created|default_if_none:"—" }}</td><td>{{ row.run.stats.updated|default_if_none:"—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% for row in schedule %}
+    <details id="schedule-{{ row.config.pk }}"{% if row.config.pk == schedule_selected %} open{% endif %}>
+      <summary>Настройки и история · {{ row.config.get_category_display }}</summary>
+      <form method="post" action="{% url 'parser_schedule' %}">
+        {% csrf_token %}
+        <input type="hidden" name="configuration" value="{{ row.config.pk }}">
+        <div class="form-grid">{% include "fields.html" with form=row.form %}</div>
+        <button class="secondary">Сохранить расписание</button>
+      </form>
+      {% if row.run %}<p>Последний запуск длился {{ row.duration }} с. Задержка {{ row.delay }} мин.</p>{% endif %}
+      <ul>
+        {% for run in row.history %}
+          <li>{{ run.started_at|date:"d.m H:i" }} · {{ run.get_status_display }}
+            · получено {{ run.stats.received|default:"0" }} · сохранено {{ run.stats.saved|default:"0" }}
+            · новых {{ run.stats.created|default:"0" }} · обновлено {{ run.stats.updated|default:"0" }}
+            · повторов {{ run.stats.duplicates|default:"0" }} · недоступных {{ run.stats.unavailable|default:"0" }}
+            · ошибок {{ run.stats.errors|default:"0" }}{% if run.error %}. {{ run.error }}{% endif %}</li>
+        {% empty %}<li>Запусков пока нет.</li>{% endfor %}
+      </ul>
+    </details>
+  {% endfor %}
+</section>
+{% endtimezone %}

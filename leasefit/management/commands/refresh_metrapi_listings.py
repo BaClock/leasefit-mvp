@@ -9,8 +9,10 @@ from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
 from leasefit.listing_catalog import refresh_publication
-from leasefit.metrapi import ListingUnavailable, MetrapiError, find_rental
-from leasefit.models import ListingPublication, Membership
+from leasefit.metrapi import ListingUnavailable, MetrapiError, MetrapiQuota, find_rental
+from leasefit.metrapi_limits import locked_file, quota_paused
+from leasefit.models import ListingPublication, Membership, ParserConfiguration
+from leasefit.parser_schedule import ensure_schedule, run_due_discovery
 
 
 @transaction.atomic
@@ -37,11 +39,12 @@ def shorten_existing_schedule():
 
 
 class Command(BaseCommand):
-    help = "Recheck stored Metrapi publications when their refresh interval elapses."
+    help = "Discover new listings by category and recheck stored Metrapi publications."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Check one due batch and exit.")
         parser.add_argument("--limit", type=int, default=100, help="Maximum checks per batch.")
+        parser.add_argument("--discover-only", action="store_true", help="Process the scheduled catalog without rechecking publications.")
 
     def handle(self, *args, **options):
         if not settings.METRAPI_API_KEY:
@@ -50,28 +53,46 @@ class Command(BaseCommand):
                 sleep(3600)
             return
         shorten_existing_schedule()
+        for agency_id in Membership.objects.filter(
+            active=True, role="manager", user__is_active=True,
+        ).order_by().values_list("agency_id", flat=True).distinct():
+            ensure_schedule(agency_id)
         limit = max(1, min(options["limit"], 1000))
         while True:
-            processed, changed = self.run_batch(limit)
+            with locked_file("worker", blocking=False) as lock:
+                discovered = lock is not False and run_due_discovery()
+            processed, changed = (0, 0) if options["discover_only"] else self.run_batch(
+                limit, yield_to_discovery=not options["once"],
+            )
             if processed or options["once"]:
                 self.stdout.write(f"Checked {processed} publications, new versions: {changed}.")
             if options["once"]:
                 return
-            sleep(60)
+            if not discovered and not processed:
+                sleep(15)
 
-    def run_batch(self, limit):
+    def run_batch(self, limit, *, yield_to_discovery=False):
         processed = changed = 0
+        if quota_paused():
+            return processed, changed
         for index in range(limit):
+            if index and yield_to_discovery and ParserConfiguration.objects.filter(
+                enabled=True, agency__parser_paused=False, next_run_at__lte=timezone.now(),
+            ).exists():
+                break
             publication = claim_due_publication()
             if publication is None:
                 break
-            if index:
+            if index and not settings.METRAPI_STATE_DIRECTORY:
                 sleep(2.1)
             processed += 1
             try:
                 item = find_rental((publication.source, publication.source_id))
             except ListingUnavailable:
                 item = None
+            except MetrapiQuota as exc:
+                self.stderr.write(str(exc))
+                break
             except MetrapiError as exc:
                 self.stderr.write(f"Publication {publication.pk}: {exc}")
                 continue

@@ -139,6 +139,7 @@ class PremisesForm(VersionForm):
             "commercial_date": forms.DateInput(
                 attrs={"type": "date"}, format="%Y-%m-%d"
             ),
+            "availability_confirmed_on": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
         }
 
     def __init__(self, *args, **kwargs):
@@ -171,6 +172,8 @@ class PremisesForm(VersionForm):
             self.add_error("city", "Укажите город перед подтверждением местоположения.")
         if d.get("commercial_date") and d["commercial_date"] > timezone.localdate():
             self.add_error("commercial_date", "Дата не может быть в будущем.")
+        if d.get("availability_confirmed_on") and d["availability_confirmed_on"] > timezone.localdate():
+            self.add_error("availability_confirmed_on", "Дата не может быть в будущем.")
         if d.get("commercial_status") == "confirmed" and (
             not d.get("commercial_source")
             or not d.get("commercial_date")
@@ -1094,6 +1097,43 @@ class CatalogFilterForm(forms.Form):
         return d
 
 
+CATALOG_FLAGS = {
+    "water": "water_supply", "sewerage": "sewerage", "ventilation": "ventilation",
+    "separate_exhaust": "separate_exhaust", "separate_entrance": "separate_entrance",
+    "display_windows": "display_windows", "parking": "parking", "loading_access": "loading_access",
+    "truck_access": "truck_access", "access_24h": "access_24h", "storage_zone": "storage_zone",
+}
+
+
+class SavedCatalogFilterForm(CatalogFilterForm):
+    city = forms.CharField(label="Город", required=False, max_length=120)
+    district = forms.CharField(label="Район", required=False, max_length=120)
+    floor = forms.CharField(label="Этаж", required=False, max_length=40)
+    rent_min = forms.DecimalField(label="Аренда от, ₽/мес.", required=False, min_value=0)
+    deposit_min = forms.DecimalField(label="Залог от, ₽", required=False, min_value=0)
+    deposit_max = forms.DecimalField(label="Залог до, ₽", required=False, min_value=0)
+    initial_max = forms.DecimalField(label="Первый месяц и залог до, ₽", required=False, min_value=0)
+    height_min = forms.DecimalField(label="Высота потолков от, м", required=False, min_value=0)
+    power_min = forms.DecimalField(label="Мощность от, кВт", required=False, min_value=0)
+    availability = forms.ChoiceField(label="Актуальность", required=False, choices=[
+        ("", "Все"), ("active", "Доступные"), ("archived", "Сняты с публикации"),
+        ("manual", "Без публикаций"),
+    ])
+    include_unknown = forms.BooleanField(label="Включать помещения с неизвестными характеристиками", required=False)
+
+    def __init__(self, *args, **kwargs):
+        from .characteristics import BY_CODE
+        from .listing_filters import CATEGORIES
+
+        super().__init__(*args, **kwargs)
+        self.fields["category"] = forms.ChoiceField(label="Категория объявления", required=False, choices=[("", "Все"), *CATEGORIES])
+        for name, code in CATALOG_FLAGS.items():
+            self.fields[name] = forms.ChoiceField(
+                label=BY_CODE[code]["label"], required=False,
+                choices=[("", "Любое"), ("yes", "Есть"), ("no", "Нет"), ("unknown", "Не указано")],
+            )
+
+
 class RecommendationFilterForm(CatalogFilterForm):
     rent_max = None
     monthly_max = forms.DecimalField(
@@ -1113,6 +1153,17 @@ class RecommendationFilterForm(CatalogFilterForm):
         label="Есть подтверждённые обязательные параметры", required=False
     )
     only_new = forms.BooleanField(label="Ещё не добавлены в сравнение", required=False)
+    score_min = forms.IntegerField(label="Fit Score от", required=False, min_value=0, max_value=100)
+    budget_state = forms.ChoiceField(label="Месячный бюджет", required=False, choices=[
+        ("", "Любой"), ("within", "В пределах"), ("clarify", "Требует уточнения"),
+        ("over", "Превышен"), ("unset", "Лимит не задан"),
+    ])
+    completeness = forms.ChoiceField(label="Полнота сведений", required=False, choices=[
+        ("", "Любая"), ("complete", "Данные заполнены"), ("unknown", "Есть пробелы"),
+    ])
+    availability = forms.ChoiceField(label="Актуальность помещения", required=False, choices=[
+        ("", "Актуальные"), ("archived", "Снятые с публикации"),
+    ])
     sort = forms.ChoiceField(
         label="Сортировка внутри группы",
         required=False,

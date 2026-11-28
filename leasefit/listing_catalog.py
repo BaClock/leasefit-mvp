@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from .characteristics import BY_CODE
 from .metrapi import SOURCES
 from .metrapi_listings import premises_listing_reference, source_name
 from .models import (
@@ -33,6 +34,8 @@ SNAPSHOT_FIELDS = {
     "commercial_layout": "Планировка", "commercial_building_type": "Вид здания",
     "state": "Доступность", "group_id": "Группа дублей",
     "group_spread_m": "Разброс координат",
+    "address": "Адрес из объявления", "categories": "Назначение",
+    "details": "Параметры объявления",
 }
 ENUM_LABELS = {
     "included": "Включён / не начисляется", "excluded": "Сверх базовой ставки",
@@ -62,16 +65,23 @@ def snapshot_for(item, previous):
     if item is None:
         return {**previous, "state": "unavailable"}
     values = {key: item.get(key) for key in SNAPSHOT_FIELDS if key != "state"}
-    return {**values, "state": "active"}
+    return {**values, "state": "active" if item.get("active", True) else "unavailable"}
 
 
 def save_version(publication, item, checked_at):
     previous = publication.snapshot
     snapshot = snapshot_for(item, previous)
-    changed = previous != snapshot
+    volatile = {"updated_at", "last_seen"}
+
+    def material(record):
+        if not record.get("details"):
+            return record
+        return {**record, "details": {key: value for key, value in record["details"].items() if key not in volatile}}
+
+    changed = material(previous) != material(snapshot)
+    publication.snapshot = snapshot
     if changed:
         publication.version += 1
-        publication.snapshot = snapshot
         changes = [
             label for key, label in SNAPSHOT_FIELDS.items()
             if previous.get(key) != snapshot.get(key)
@@ -81,10 +91,11 @@ def save_version(publication, item, checked_at):
             captured_at=checked_at, snapshot=snapshot, changes=changes,
         )
     publication.checked_at = checked_at
+    publication.active = snapshot["state"] == "active"
     publication.next_check_at = checked_at + timedelta(hours=settings.METRAPI_REFRESH_HOURS)
     if item is not None:
         publication.group_id = item.get("group_id") or ""
-    publication.save(update_fields=["version", "snapshot", "checked_at", "next_check_at", "group_id"])
+    publication.save(update_fields=["version", "snapshot", "checked_at", "next_check_at", "group_id", "active"])
     return changed
 
 
@@ -146,6 +157,16 @@ def listing_conflicts(publications):
             c.code, f"{c.label}, {c.unit}" if c.unit else c.label,
             available_values(publications, lambda s: fact_value(s, c.code)),
         )
+    for pub in publications:
+        for code, fact in (pub.snapshot.get("facts") or {}).items():
+            if fact.get("conflicting") and not any(row["key"] == code for row in conflicts):
+                conflicts.append({
+                    "key": code, "label": BY_CODE[code]["label"],
+                    "values": [
+                        {"source": publication_label(pub), "value": fragment}
+                        for fragment in fact["extraction"]["fragments"]
+                    ],
+                })
     return conflicts
 
 
@@ -200,9 +221,9 @@ def project_card(premises, publications, conflicts, projection):
 
 def write_observations(premises, publication, item, user, *, only_height=False):
     source = source_name({"source_label": SOURCES[publication.source], "source_id": publication.source_id})
-    facts = item.get("facts", {}) if item else {}
+    facts = item.get("facts", {}) if item and item.get("active", True) else {}
     records = premises.observations.filter(
-        source_type="listing", source=source, status="unverified",
+        source_type="listing", source=source, status__in=["unverified", "conflict"],
         confirmation="", superseded=False, scope="premises",
     )
     codes = set(facts) | set(records.values_list("characteristic__code", flat=True))
@@ -217,13 +238,15 @@ def write_observations(premises, publication, item, user, *, only_height=False):
             characteristic=c, scope="premises", superseded=False, status="confirmed",
         ).exclude(source_type="listing").exists():
             value = fact.get("value")
-            expected = (Decimal(value) if value is not None else None, fact.get("boolean"), fact.get("text", ""), fact.get("locator", ""))
-            if len(prior) == 1 and (prior[0].value, prior[0].boolean, prior[0].text, prior[0].locator) == expected:
+            status = "conflict" if fact.get("conflicting") else "unverified"
+            expected = (Decimal(value) if value is not None else None, fact.get("boolean"), fact.get("text", ""), fact.get("locator", ""), status, fact.get("structured_value"))
+            if len(prior) == 1 and (prior[0].value, prior[0].boolean, prior[0].text, prior[0].locator, prior[0].status, prior[0].structured_value) == expected:
                 continue
             Observation.objects.create(
                 premises=premises, characteristic=c, name=c.label, unit=c.unit,
                 source_type="listing", source=source, source_url=item["url"],
-                observed_on=item["date"], status="unverified", author=user, **fact,
+                observed_on=item["date"], status=status,
+                author=user, **{key: value for key, value in fact.items() if key in {"value", "text", "boolean", "locator", "structured_value"}},
             )
             replaced = True
             changed = True
@@ -257,6 +280,13 @@ def rebuild_card(premises, *, observations_changed=False, new=False, project=Tru
         "source": primary.source, "source_id": primary.source_id,
         "url": primary.snapshot.get("url") or premises.listing_url,
         "description": description, "photos": photos, "projected": projection,
+        "title": primary.snapshot.get("title") or (media.title if media else ""),
+        "address": primary.snapshot.get("address") or (media.address if media else ""),
+        "categories": sorted({code for pub in active for code in pub.snapshot.get("categories") or ()}),
+        "details": {
+            key: value for pub in reversed(active)
+            for key, value in (pub.snapshot.get("details") or {}).items()
+        },
     }
     if not media or any(getattr(media, key) != value for key, value in data.items()):
         PremisesListing.objects.update_or_create(premises=premises, defaults=data)
@@ -333,11 +363,11 @@ def import_listings(agency_id, user, items, *, target_id=None):
                 premises, publication, item, user, only_height=enrolling_manual_card
             )
             rebuild_card(
-                premises, observations_changed=technical, new=new, project=not enrolling_manual_card
+                premises, observations_changed=technical or bool(previous), new=new, project=not enrolling_manual_card
             )
         results.append({
             "publication": publication, "premises": premises, "created": new,
-            "linked": not new and not previous,
+            "linked": not new and not previous, "changed": publication.version != previous,
         })
     if any(row["created"] or row["linked"] for row in results):
         from .services import audit
@@ -360,6 +390,6 @@ def refresh_publication(publication_id, expected_checked_at, item, user=None):
     premises = Premises.objects.select_for_update().get(pk=publication.premises_id)
     if not save_version(publication, item, timezone.now()):
         return False
-    technical = write_observations(premises, publication, item, user)
-    rebuild_card(premises, observations_changed=technical)
+    write_observations(premises, publication, item, user)
+    rebuild_card(premises, observations_changed=True)
     return True

@@ -22,4 +22,7 @@
   <li {% if section == 'compare' %}aria-current="step"{% endif %}>
     <span>4</span> Проверка и сравнение
   </li>
+  <li {% if analysis_mode %}aria-current="step"{% endif %}>
+    <a href="{% url 'analysis' req.pk %}">Анализ</a>
+  </li>
 </ol>

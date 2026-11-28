@@ -1,0 +1,6 @@
+{% load leasefit_tags %}
+<dl class="recommendation-summary recommendation-facts">
+  <div><dt>Аренда в месяц</dt><dd>{% if costs.rent_conflict %}Уточнить{% else %}{{ costs.base|rub }}{% endif %}</dd></div>
+  <div><dt>Залог</dt><dd>{% if costs.rental_deposit_unknown %}Не указан или требует уточнения{% else %}{{ premises.deposit|rub }}{% endif %}</dd></div>
+  <div><dt>{% if costs.rental_deposit_unknown %}Известный подытог{% else %}Первый месяц и залог{% endif %}</dt><dd>{{ costs.rental_payment|rub }}</dd></div>
+</dl>

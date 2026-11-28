@@ -334,6 +334,15 @@ document.addEventListener("DOMContentLoaded", () => {
     priority.addEventListener("change", sync);
     sync();
   }
+  document.querySelector("[data-analysis-profile]")?.addEventListener("change", (event) => {
+    if (event.target.value) window.location.assign(event.target.value);
+  });
+  const openLinkTarget = () => {
+    const target = document.getElementById(window.location.hash.slice(1));
+    if (target instanceof HTMLDetailsElement) target.open = true;
+  };
+  window.addEventListener("hashchange", openLinkTarget);
+  openLinkTarget();
   for (const form of document.querySelectorAll("[data-business-setup]")) {
     const format = form.elements.namedItem("business_format");
     const sync = () => {

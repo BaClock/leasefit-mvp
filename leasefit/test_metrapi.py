@@ -376,7 +376,9 @@ class MetrapiTests(TestCase):
                 "Парковка для соседнего здания. Возможно увеличение мощности до 40 кВт."
             )
         })
-        self.assertEqual(parsed["facts"], {})
+        self.assertEqual(set(parsed["facts"]), {"water_supply", "power_upgrade"})
+        self.assertTrue(parsed["facts"]["water_supply"]["conflicting"])
+        self.assertTrue(parsed["facts"]["power_upgrade"]["boolean"])
 
     def test_listing_confirmation_form_accepts_link_as_only_source_detail(self):
         p = Premises.objects.create(agency=self.agency, label="Лот")
@@ -432,7 +434,7 @@ class MetrapiTests(TestCase):
         ):
             with self.subTest(description=description):
                 parsed = preview_item({**LISTING, "description": description, "ceiling_height": None})
-                self.assertNotIn("ceiling_height_m", parsed["facts"])
+                self.assertIsNone(parsed["facts"].get("ceiling_height_m", {}).get("value"))
         from_text = preview_item({**LISTING, "description": LISTING_DESCRIPTION, "ceiling_height": None})
         self.assertEqual(from_text["height"], "3.00")
         self.assertTrue(from_text["height_from_description"])

@@ -7,6 +7,7 @@ GROUPS = [
     ("layout", "Площадь и планировка"),
     ("engineering", "Инженерные коммуникации"),
     ("access", "Условия доступа и работы помещения"),
+    ("specialized", "Складские и производственные характеристики"),
 ]
 
 
@@ -151,6 +152,22 @@ STANDARD = [
     definition("delivery_approach", "Подъезд непосредственно к входу", "access"),
     definition("noise_limits", "Ограничения по шуму", "access", "text"),
     definition("storage_zone", "Зона хранения", "layout"),
+    definition("repair_state", "Состояние ремонта", "layout", "text"),
+    definition("first_line", "Первая линия", "layout"),
+    definition("hot_water", "Горячая вода", "engineering"),
+    definition("restroom", "Санузел", "engineering"),
+    definition("gas_supply", "Газоснабжение", "engineering"),
+    definition("service_entrance", "Служебный вход", "access"),
+    definition("signage", "Размещение вывески", "access"),
+    definition("listing_access_hours", "Часы доступа по объявлению", "access", "text"),
+    definition("floor_load", "Нагрузка на пол", "specialized", "number", "т/м²"),
+    definition("gate_height", "Высота ворот", "specialized", "number", "м"),
+    definition("gate_width", "Ширина ворот", "specialized", "number", "м"),
+    definition("loading_docks", "Доковые ворота", "specialized"),
+    definition("semi_trailer_access", "Подъезд фуры", "specialized"),
+    definition("temperature_mode", "Температурный режим", "specialized", "text"),
+    definition("overhead_crane", "Крановое оборудование", "specialized"),
+    definition("cold_storage", "Холодильное оборудование", "specialized"),
 ]
 LEGACY_ACCESS = {"visitor_access", "working_hours", "loading_access", "access_24h"}
 for spec in STANDARD:

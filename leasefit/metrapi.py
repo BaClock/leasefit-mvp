@@ -13,7 +13,12 @@ from django.core.validators import URLValidator
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .characteristics import BY_CODE
-from .listing_keywords import FACILITIES, boolean_facts, single_area, single_floor
+from .listing_keywords import (
+    AREA, FLOOR, TEXT_FLOOR, EXTRACTION_VERSION, FACILITIES, boolean_evidence,
+    extra_evidence, single_floor,
+)
+from .listing_filters import CATEGORY_NAMES
+from .metrapi_limits import QuotaExceeded, pause_for_quota, reserve_request
 
 API_HOST = "api.metrapi.ru"
 SOURCES = {
@@ -44,7 +49,8 @@ PHOTO_DOMAINS = {
 }
 CEILING_HEIGHT_CODE = "ceiling_height_m"
 CEILING_IN_DESCRIPTION = re.compile(
-    r"\b(?:высота\s+потолк(?:а|ов)|потолки(?:\s+высотой)?)\s*"
+    r"(?:^|[\n;,.!?])\s*(?:[•·*–—-]\s*)?"
+    r"(?:высота\s+потолк(?:а|ов)|потолки(?:\s+высотой)?)\s*"
     r"(?:[:=–—-]\s*|составляет\s+)?"
     r"([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*(?:метр(?:а|ов)?|м)\b"
     r"(?!\.?\s*(?:[-–—]\s*[0-9]|(?:до|или|и)\s+[0-9]|[0-9]+\s*см))",
@@ -64,6 +70,7 @@ PURPOSES = {
     "retail": "retail",
     "catering": "food",
     "warehouse": "warehouse",
+    "manufacturing": "other",
     "free_purpose": "other",
 }
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -71,6 +78,11 @@ SEARCH_PAGE_SIZE = 50
 MAX_SHORT_RETRY_SECONDS = 3
 MAX_LISTING_DESCRIPTION = 32000
 MAX_LISTING_PHOTOS = 80
+CONTACT_IN_DESCRIPTION = re.compile(
+    r"(?<!\w)(?:(?:\+7|8)[ \t().-]*(?:\d[ \t().-]*){9}\d(?!\d)"
+    r"|[\w.+-]+@[\w.-]+\.[a-zа-я]{2,})(?!\w)",
+    re.IGNORECASE,
+)
 BOOLEAN_FIELDS = {
     "separate_entrance": ("entrance_type", {"отдельный"}, {"общий"}),
     "water_supply": ("water_supply", {"центральное", "скважина", "колодец"}, set()),
@@ -97,6 +109,37 @@ class ListingNotFound(MetrapiError):
 
 class ListingUnavailable(MetrapiError):
     pass
+
+
+class CursorExpired(MetrapiError):
+    pass
+
+
+class MetrapiQuota(MetrapiError):
+    pass
+
+
+def rental_page(params, *, cursor=None, since=None, feed=False, limit=SEARCH_PAGE_SIZE, include_inactive=False):
+    params = {**params, "limit": limit}
+    if cursor is not None:
+        params["cursor"] = cursor
+    elif since is not None:
+        params["since"] = since
+    if include_inactive:
+        params["archived"] = 1
+    endpoint = "feed" if feed else "items"
+    payload = get_payload(f"/{endpoint}?{urlencode(params, doseq=True)}")
+    items, next_cursor = payload.get("items"), payload.get("next_cursor")
+    if not isinstance(items, list) or (
+        next_cursor is not None and (
+            isinstance(next_cursor, bool) or not isinstance(next_cursor, (str, int)) or next_cursor == ""
+        )
+    ) or (feed and next_cursor is None) or (not feed and next_cursor is not None and cursor == next_cursor):
+        raise MetrapiError("Metrapi вернул некорректную страницу объявлений.")
+    return [
+        preview_item(item) for item in items
+        if is_commercial_rental(item, include_inactive=include_inactive)
+    ], next_cursor, len(items)
 
 
 def search_rentals(*, locality, query="", area_min=None, area_max=None, cursor=None):
@@ -127,12 +170,12 @@ def search_rentals(*, locality, query="", area_min=None, area_max=None, cursor=N
     ], next_cursor
 
 
-def is_commercial_rental(item):
+def is_commercial_rental(item, *, include_inactive=False):
     return (
         isinstance(item, dict)
         and item.get("realty_type") == "commercial"
         and item.get("deal_type") == "rent"
-        and not item.get("delisted_at")
+        and (include_inactive or not item.get("delisted_at"))
         and not (
             isinstance(item.get("commercial_types"), list)
             and "land" in item["commercial_types"]
@@ -196,12 +239,16 @@ def get_payload(path):
     if not settings.METRAPI_API_KEY:
         raise MetrapiError("Для поиска задайте METRAPI_API_KEY на сервере.")
     try:
+        reserve_request()
         status, data = read_payload(path)
         if status == 429:
             delay = short_retry_delay(data)
             if delay is not None:
                 sleep(delay)
+                reserve_request()
                 status, data = read_payload(path)
+    except QuotaExceeded:
+        raise MetrapiQuota("Достигнут лимит запросов Metrapi на текущие сутки UTC.") from None
     except (OSError, HTTPException):
         raise MetrapiError(
             "Не удалось получить данные Metrapi. Повторите позже."
@@ -212,7 +259,12 @@ def get_payload(path):
     if status in {401, 403}:
         raise MetrapiError("Metrapi отклонил ключ или доступ к API.")
     if status == 429:
+        if b"daily limit exceeded" in data.lower():
+            pause_for_quota()
+            raise MetrapiQuota("Достигнут лимит запросов Metrapi на текущие сутки UTC.")
         raise MetrapiError("Достигнут лимит запросов Metrapi. Повторите позже.")
+    if status == 410 and path.startswith("/feed"):
+        raise CursorExpired("Курсор Metrapi устарел. Требуется повторная загрузка каталога.")
     if status != 200:
         raise MetrapiError(f"Metrapi вернул ошибку HTTP {status}.")
     if len(data) > MAX_RESPONSE_BYTES:
@@ -347,8 +399,7 @@ def ceiling_height_from_description(description):
     return height if height is not None and Decimal(height) > 0 else None
 
 
-def reported_booleans(item, description):
-    extracted = boolean_facts(description)
+def reported_booleans(item):
     facts = {}
     for code in FACILITIES:
         field, positive, negative = BOOLEAN_FIELDS.get(code, (code, set(), set()))
@@ -367,9 +418,29 @@ def reported_booleans(item, description):
             facts[code] = {"boolean": True}
         elif value in negative | {"нет", "отсутствует", "0", "false"}:
             facts[code] = {"boolean": False}
-        elif value in {"", "не указано", "неизвестно"} and code in extracted:
-            facts[code] = {"boolean": extracted[code], "locator": "Описание объявления"}
     return facts
+
+
+def merge_description_fact(facts, code, field, readings):
+    if not readings:
+        return
+    fact = facts.setdefault(code, {})
+    structured = fact.get(field)
+    extracted = next(iter(readings)) if len(readings) == 1 else None
+    if structured is None and extracted is not None:
+        fact.update({field: extracted, "locator": "Описание объявления"})
+    if len(readings) > 1 or (structured is not None and structured != extracted):
+        fact["conflicting"] = True
+    fact["extraction"] = {"version": EXTRACTION_VERSION, "fragments": list(readings.values())}
+
+
+def numeric_evidence(pattern, description):
+    return {
+        value: description[match.start():match.end()].strip(" ;,.!\n")
+        for match in pattern.finditer(description)
+        if (value := decimal_value(match[1].replace(",", "."))) is not None
+        and Decimal(value) > 0
+    }
 
 
 def preview_item(item):
@@ -381,6 +452,9 @@ def preview_item(item):
             rent = decimal_value(item.get("price"), 12 if period == "в год" else 1)
         elif period:
             rate = decimal_value(item.get("price"), 12 if period == "в год" else 1)
+    advertised_period = to_text(item.get("src_price_sqm_period")).casefold()
+    if rent is None and rate is None and unit != "за м³" and advertised_period in {"в месяц", "в год"}:
+        rate = decimal_value(item.get("src_price_sqm"), 12 if advertised_period == "в год" else 1)
 
     purposes = item.get("commercial_types")
     purposes = (
@@ -404,50 +478,59 @@ def preview_item(item):
 
     raw_description = item.get("description")
     description = (
-        raw_description.replace("\x00", "")[:MAX_LISTING_DESCRIPTION]
+        CONTACT_IN_DESCRIPTION.sub("[контакт скрыт]", raw_description.replace("\x00", ""))[:MAX_LISTING_DESCRIPTION]
         if isinstance(raw_description, str)
         else ""
     )
-    facts = reported_booleans(item, description)
+    facts = reported_booleans(item)
+    for code, readings in boolean_evidence(description).items():
+        merge_description_fact(facts, code, "boolean", readings)
+    if repair := to_text(item.get("renovation")).casefold().replace("ё", "е"):
+        facts["repair_state"] = {"text": repair}
+    for code, (field, readings) in extra_evidence(description).items():
+        merge_description_fact(facts, code, field, readings)
     area = decimal_value(item.get("area_total"))
     if area is not None and Decimal(area) > 0:
         facts["area_sqm"] = {"value": area}
-    else:
-        area = single_area(description)
-        if area is not None:
-            facts["area_sqm"] = {"value": area, "locator": "Описание объявления"}
+    area_readings = numeric_evidence(AREA, description)
+    merge_description_fact(facts, "area_sqm", "value", area_readings)
+    area = facts.get("area_sqm", {}).get("value")
     floor = to_text(item.get("floor"), 40)
     if floor:
         facts["floor"] = {"text": floor}
-    else:
-        floor = single_floor(description)
-        if floor:
-            facts["floor"] = {"text": floor, "locator": "Описание объявления"}
+    floor_readings = {}
+    for pattern in (FLOOR, TEXT_FLOOR):
+        for match in pattern.finditer(description):
+            fragment = match[0].strip(" ;,.!\n")
+            if number := single_floor(fragment):
+                floor_readings[number] = fragment
+    merge_description_fact(facts, "floor", "text", floor_readings)
+    floor = facts.get("floor", {}).get("text", "")
     height = decimal_value(item.get("ceiling_height"))
-    height_from_description = False
-    if height is None or Decimal(height) <= 0:
-        height = ceiling_height_from_description(description)
-        height_from_description = height is not None
-    if height is not None:
+    if height is not None and Decimal(height) > 0:
         facts[CEILING_HEIGHT_CODE] = {"value": height}
-        if height_from_description:
-            facts[CEILING_HEIGHT_CODE]["locator"] = "Описание объявления"
+    heights = numeric_evidence(CEILING_IN_DESCRIPTION, description)
+    merge_description_fact(facts, CEILING_HEIGHT_CODE, "value", heights)
+    height_fact = facts.get(CEILING_HEIGHT_CODE, {})
+    height = height_fact.get("value")
+    height_from_description = bool(height_fact.get("locator"))
     entrance = to_text(item.get("entrance_type"))
 
     power = decimal_value(item.get("power_kw"))
-    if power is not None:
+    if power is not None and Decimal(power) > 0:
         facts["power_kw"] = {"value": power}
-    elif isinstance(raw_description, str):
-        matches = {
-            decimal_value(match[1].replace(",", "."))
-            for match in POWER_IN_DESCRIPTION.finditer(
-                raw_description.casefold().translate(CYRILLIC_LOOKALIKES)
-            )
+    powers = {
+        value: description[match.start():match.end()].strip(" ;,.!\n")
+        for match in POWER_IN_DESCRIPTION.finditer(description.casefold().translate(CYRILLIC_LOOKALIKES))
+        if (value := decimal_value(match[1].replace(",", "."))) is not None and Decimal(value) > 0
+    }
+    merge_description_fact(facts, "power_kw", "value", powers)
+    power = facts.get("power_kw", {}).get("value")
+    if facts.get("access_24h", {}).get("boolean") is True and not facts["access_24h"].get("conflicting"):
+        facts["operating_schedule"] = {
+            **{k: v for k, v in facts["access_24h"].items() if k in {"locator", "extraction"}},
+            "structured_value": {"mode": "always"},
         }
-        if len(matches) == 1:
-            power = matches.pop()
-            if power is not None:
-                facts["power_kw"] = {"value": power, "locator": "Описание объявления"}
 
     description_facts = []
     for code in sorted(facts):
@@ -455,6 +538,8 @@ def preview_item(item):
         if not fact.get("locator") or code in {CEILING_HEIGHT_CODE, "power_kw"}:
             continue
         spec = BY_CODE[code]
+        if fact.get("conflicting") or "structured_value" in fact:
+            continue
         if "boolean" in fact:
             value = "Есть" if fact["boolean"] else "Нет"
         else:
@@ -468,6 +553,27 @@ def preview_item(item):
     return {
         "title": title or address or "Объявление",
         "label": address or title,
+        "address": address,
+        "categories": sorted(set(purposes).intersection(CATEGORY_NAMES)),
+        "active": not item.get("delisted_at"),
+        "details": {
+            **{
+                key: to_text(item.get(key), 500)
+                for key in (
+                    "address_alt", "street", "house_number", "floors_total", "build_year",
+                    "renovation", "building_class", "rent_period", "published_at",
+                    "updated_at", "first_seen", "delisted_at", "commercial_layout",
+                    "commercial_building_type", "lease_type", "entrance_type",
+                    "heating", "parking", "tax_form", "deposit", "commission",
+                    "business_center", "prepayment", "utilities_payer", "area_text",
+                    "last_seen", "region", "microdistrict", "bathroom", "house_type",
+                    "ceiling_type", "build_status", "elevators", "security",
+                )
+                if item.get(key) not in (None, "", [], {})
+            },
+            **{key: str(item[key]) for key in ("lat", "lon") if isinstance(item.get(key), (int, Decimal))},
+            "commercial_types": sorted(set(purposes)),
+        },
         "city": to_text(item.get("locality"), 120),
         "district": to_text(item.get("district"), 120),
         "source": source,

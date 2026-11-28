@@ -107,6 +107,7 @@ urlpatterns = [
         name="business_template",
     ),
     path("app/parser", v.parser_preview, name="parser"),
+    path("app/parser/schedule", v.parser_schedule_settings, name="parser_schedule"),
     path("app/parser/import", v.parser_import, name="parser_import"),
     path("app/requests/<int:pk>/refine", v.refine, name="refine"),
     path("app/requests", v.requests_list, name="requests"),
@@ -117,6 +118,7 @@ urlpatterns = [
     path("app/requests/<int:pk>/delete", v.delete_request, name="delete_request"),
     path("app/requests/<int:pk>/state", v.lifecycle, name="lifecycle"),
     path("app/requests/<int:pk>/objects", v.objects, name="objects"),
+    path("app/requests/<int:pk>/analysis", v.objects, name="analysis"),
     path("app/requests/<int:pk>/objects/new", v.premises_edit, name="premises_new"),
     path(
         "app/requests/<int:pk>/objects/<int:object_id>",

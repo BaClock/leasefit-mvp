@@ -4,13 +4,26 @@
   <section class="panel" id="recommendations" aria-labelledby="recommendations-title">
     <div class="section-heading recommendations-heading">
       <div>
-        <h2 id="recommendations-title">Подходящие помещения из каталога</h2>
+        <h2 id="recommendations-title">{% if analysis_mode %}ТОП-5 помещений{% else %}Подходящие помещения из каталога{% endif %}</h2>
         {% if catalog_count and ranking_ready %}
           <p>LeaseFIT проанализировал помещения вашего агентства по требованиям выбранного бизнеса.</p>
         {% endif %}
       </div>
-      <a class="button secondary" href="#selected">К выбранным{% if cards %} · {{ cards|length }}{% endif %}</a>
+      <div class="actions">
+        {% if not analysis_mode %}<a class="button secondary" href="{% url 'analysis' req.pk %}">Открыть анализ и ТОП-5</a>{% endif %}
+        <a class="button secondary" href="#selected">К выбранным{% if cards %} · {{ cards|length }}{% endif %}</a>
+      </div>
     </div>
+    {% if analysis_mode %}
+      <div class="actions">
+        <label for="analysis-profiles">Бизнес-профиль</label>
+        <select id="analysis-profiles" data-analysis-profile>
+          {% for profile in analysis_profiles %}<option value="{% url 'analysis' profile.pk %}"{% if profile.pk == req.pk %} selected{% endif %}>{{ profile.title }}</option>{% endfor %}
+        </select>
+        <a href="{% url 'requests' %}">Все бизнес-профили</a>
+      </div>
+      <p class="hint">Предварительная оценка выполнена по данным объявлений. Существенные условия необходимо проверить перед заключением договора аренды.</p>
+    {% endif %}
     <dl class="recommendation-summary">
       <div><dt>В каталоге</dt><dd>{{ catalog_count }}</dd></div>
       <div><dt>Рекомендуемые</dt><dd>{{ recommendation_counts.recommended|default:"0" }}</dd></div>
@@ -39,15 +52,23 @@
       {% endif %}
       <details class="recommendation-controls" {% if filter_query or recommendation_filters.errors %}open{% endif %}>
         <summary>Фильтры и сортировка</summary>
-        <form method="get" action="{% url 'objects' req.pk %}#recommendations">
+        <form method="get" action="{{ analysis_url }}#recommendations">
           <div class="form-grid">{% include "fields.html" with form=recommendation_filters %}</div>
           <div class="actions">
             <button class="secondary">Применить фильтры</button>
-            {% if filter_query %}<a href="{% url 'objects' req.pk %}#recommendations">Сбросить</a>{% endif %}
+            {% if filter_query %}<a href="{{ analysis_url }}#recommendations">Сбросить</a>{% endif %}
           </div>
         </form>
       </details>
-      {% if not recommendation_filters.errors and not recommendation_counts.recommended and not unmatched_districts %}
+      {% if analysis_mode and not recommendation_filters.errors %}
+        {% if top %}
+          <p>Рекомендуемые по имеющимся данным · {{ top|length }}</p>
+          {% include "recommendation_group.html" with title="" items=top %}
+        {% else %}
+          <p>Подходящих помещений по имеющимся данным пока нет.</p>
+        {% endif %}
+        {% if recommendation_page.paginator.count %}<h3>Альтернативные варианты</h3>{% endif %}
+      {% elif not recommendation_filters.errors and not recommendation_counts.recommended and not unmatched_districts %}
         <p>Подтверждённых подходящих помещений пока не найдено.</p>
       {% endif %}
       {% if recommendation_groups.recommended %}
@@ -70,6 +91,9 @@
       {% endif %}
       {% if recommendation_groups.location %}
         {% include "recommendation_group.html" with title="Помещения с неподтверждённым местоположением" items=recommendation_groups.location %}
+      {% endif %}
+      {% if recommendation_groups.archived %}
+        {% include "recommendation_group.html" with title="Снятые с публикации" items=recommendation_groups.archived %}
       {% endif %}
       {% if not recommendation_page.paginator.count and not recommendation_filters.errors and not unmatched_districts %}
         <p>По текущим фильтрам вариантов нет.</p>

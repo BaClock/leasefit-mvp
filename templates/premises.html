@@ -8,9 +8,12 @@
       <a href="{% url 'all_premises' %}">Каталог помещений</a> / Карточка</div>{% endif %}<div class="page-heading">
       <div>
         <div class="eyebrow">ОБЩАЯ КАРТОЧКА АГЕНТСТВА</div>
-        <h1>{% if new_object %}Новое помещение{% else %}{{ p.label }}{% endif %}</h1>
+        <h1>{% if new_object %}Новое помещение{% else %}{{ listing.title|default:p.label }}{% endif %}</h1>
+        {% if p.pk %}
+          <p>{% if listing.title and listing.title != p.label %}{{ p.label }} · {% endif %}{{ p.city }}{% if p.district %} · {{ p.district }}{% endif %}</p>
+          <p>{% if listing_categories %}{{ listing_categories|join:", " }}{% else %}{{ p.get_premises_type_display }}{% endif %}</p>
+        {% endif %}
         {% if p.pk %}<p class="premises-id">Помещение №{{ p.pk }}</p>{% endif %}
-        <p>Характеристики объекта общие. Требования, выводы и заметки клиента принадлежат запросу.</p>
       </div>
       {% if not req and not new_object %}
         <a class="button secondary" href="{% url 'delete_premises' p.pk %}">Удалить помещение</a>
@@ -24,8 +27,30 @@
     {% endif %}
     {% if listing or can_refresh_listing or publications %}
       {% include "premises_listing.html" %}
+    {% elif p.pk %}
+      {% include "rental_payment.html" with premises=p costs=economics only %}
+      {% include "listing_source_link.html" with url=p.listing_url only %}
+    {% endif %}
+    {% if p.pk %}
+      <nav class="actions" aria-label="Разделы карточки">
+        <a href="#property-basics">Основные параметры</a>
+        <a href="#property-technical">Технические характеристики</a>
+        {% if listing %}<a href="#property-description">Описание</a>{% endif %}
+        <a href="#property-analysis">Анализ</a>
+        {% if can_edit %}<a href="#property-edit">Редактировать карточку</a>{% endif %}
+      </nav>
+      <section class="panel" id="property-basics">
+        <h2>Основные параметры</h2>
+        <dl class="compact-properties">
+          {% if p.area is not None %}<div><dt>Площадь</dt><dd>{{ p.area }} м²</dd></div>{% endif %}
+          {% if p.floor %}<div><dt>Этаж</dt><dd>{{ p.floor }}</dd></div>{% endif %}
+          {% for label, value in structured_details %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+        </dl>
+      </section>
     {% endif %}
     {% if shared %}<div class="notice warning">Помещение используется в нескольких запросах ({{ use_count }}). Изменение общих характеристик потребует пересчёта связанных оценок. Перед сохранением подтвердите изменение.</div>{% endif %}
+    {% if not p.pk or can_edit %}
+    {% if p.pk %}<details class="panel" id="property-edit"{% if form.errors or request.GET.edit %} open{% endif %}><summary>Редактировать общую карточку</summary>{% endif %}
     <form method="post" class="dirty-form">
       {% csrf_token %}
       <fieldset {% if not can_edit %}disabled{% endif %}>
@@ -38,7 +63,6 @@
                   <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endif %}
             {% endfor %}
           </div>
-          <p class="hint">Площадь здесь используется для цены и фильтров. Для подтверждения технического соответствия запишите характеристику «Площадь» с источником ниже.</p>
         </section>
         <section class="panel">
           <details id="commercial-terms" {% if form.errors or request.GET.edit == "commercial" %}open{% endif %}>
@@ -56,35 +80,54 @@
 </section>
 </fieldset>
 </form>
+{% if p.pk %}</details>{% endif %}
+{% endif %}
 {% if p.pk %}
+  <section class="panel" id="property-technical">
+    <h2>Технические характеристики</h2>
+    {% if can_edit %}<p><a href="#evidence-form" data-open-details>Редактировать характеристики помещения</a></p>{% endif %}
   {% for group in groups %}
-    <section class="panel">
-      <h2>{{ group.title }}</h2>
-      <div class="fact-grid">
-        {% for entry in group.entries %}
-          {% if entry.primary %}
-            {% include "fact_card.html" %}
-          {% endif %}
-        {% endfor %}
-      </div>
-      {% if group.has_advanced %}
-        <details>
-          <summary>Дополнительные характеристики</summary>
-          <div class="fact-grid">
-            {% for entry in group.entries %}
-              {% if not entry.primary %}
-                {% include "fact_card.html" %}
-              {% endif %}
-            {% endfor %}
+    <section>
+      <h3>{{ group.title }}</h3>
+      <dl class="compact-properties">
+        {% for entry in group.entries %}{% if entry.primary or entry.latest %}
+          <div><dt>{{ entry.characteristic.label }}</dt>
+            <dd>{% if entry.conflict %}Требует уточнения{% elif entry.latest.structure_display %}{{ entry.latest.structure_display }}{% elif entry.latest.value is not None %}{{ entry.latest.value }} {{ entry.characteristic.unit }}{% elif entry.latest.boolean is not None %}{{ entry.latest.boolean|yesno:"Есть,Нет" }}{% else %}{{ entry.latest.text|default:"Не указано" }}{% endif %}</dd>
           </div>
-        </details>
-      {% endif %}
+        {% endif %}{% endfor %}
+      </dl>
     </section>
   {% endfor %}
+  </section>
+  {% if listing %}<section class="panel" id="property-description"><h2>Описание из объявления</h2>
+    {% if listing.description %}<div class="listing-description">{{ listing.description }}</div>{% else %}<p>Описание не указано.</p>{% endif %}
+  </section>{% endif %}
+  <section class="panel" id="property-analysis">
+    <h2>Анализ для выбранного бизнеса</h2>
+    {% if not req and analysis_profiles %}
+      <form method="get" action="#property-analysis" class="actions">
+        <label for="analysis-profile">Бизнес-профиль</label>
+        <select id="analysis-profile" name="analysis_profile" required>
+          <option value="">Выберите профиль</option>
+          {% for profile in analysis_profiles %}<option value="{{ profile.pk }}"{% if profile.pk == analysis_profile.pk %} selected{% endif %}>{{ profile.title }}</option>{% endfor %}
+        </select><button>Рассчитать</button>
+      </form>
+    {% endif %}
+    {% if property_assessment %}
+      {% with card=property_assessment %}
+        {% if card.preliminary %}<p class="hint">Предварительная оценка выполнена по данным объявлений. Существенные условия необходимо проверить перед заключением договора аренды.</p>{% endif %}
+        <p>Fit Score · {% if card.score is not None %}{{ card.score }} / 100{% else %}недостаточно данных{% endif %}</p>
+        {% include "outcome_badges.html" with review=card.outcome only %}
+        {% include "primary_limitations.html" with review=card.outcome %}
+        {% include "assessment_details.html" %}
+        <p><a href="{% url 'analysis' analysis_profile.pk %}">Смотреть подбор для {{ analysis_profile.title }}</a></p>
+      {% endwith %}
+    {% endif %}
+  </section>
   {% include "regulatory.html" with rules=regulatory %}
   {% if can_edit %}
-    <section class="panel" id="evidence-form">
-      <h2>Записать фактическую характеристику</h2>
+    <details class="panel" id="evidence-form"{% if obsform.errors or request.GET.characteristic %} open{% endif %}>
+      <summary>Записать фактическую характеристику</summary>
       <p>Выберите характеристику и укажите фактическое значение. Затем задайте статус сведений, источник и дату.</p>
       <form method="post"
             action="{% if req %}
@@ -99,13 +142,21 @@
         <button>Сохранить сведения</button>
       </form>
       <details>
+        <summary>История и разрешение конфликтов</summary>
+        {% for group in groups %}
+          {% for entry in group.entries %}{% if entry.records %}
+            {% include "fact_card.html" %}
+          {% endif %}{% endfor %}
+        {% endfor %}
+      </details>
+      <details>
         <summary>Добавить нестандартную характеристику в справочник агентства</summary>
         <form method="post" action="{% url 'custom_characteristic' p.pk %}">
           {% csrf_token %}
           {% include "fields.html" with form=customform %}<button class="secondary">Добавить свой параметр</button>
         </form>
       </details>
-    </section>
+    </details>
   {% endif %}
   <section class="panel">
     <h2>Файлы помещения</h2>

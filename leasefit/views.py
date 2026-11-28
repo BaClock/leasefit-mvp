@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Count, F, Q
 from django.db.models.fields.json import KeyTextTransform
 from django.http import Http404, HttpResponse, FileResponse
@@ -35,6 +35,7 @@ from .operations import GENERAL_ACCESS, LEGACY_BY_REPLACEMENT, STRUCTURED, value
 from .recommendations import (
     for_request_city,
     recommend_catalog_premises,
+    is_available, staff_availability, top_order, with_availability,
     technical_filters,
 )
 from .models import *
@@ -43,8 +44,11 @@ from .services import *
 from .characteristics import GROUPS, STANDARD, resolve_characteristic
 from .metrapi import (
     CEILING_HEIGHT_CODE, ListingUnavailable, MetrapiError, find_rental,
-    listing_reference, search_rentals,
+    listing_reference, rental_page, search_rentals, SEARCH_PAGE_SIZE,
 )
+from .listing_filters import CATEGORY_NAMES, api_filters, matches
+from .parser_forms import ManualSearchForm, ScheduleForm
+from .parser_schedule import DEFAULT_MAXIMUM, SCHEDULE_ZONE, ensure_schedule, next_slot
 from .metrapi_listings import premises_listing_reference
 from .listing_catalog import (
     SNAPSHOT_FIELDS, display_value, import_listings, publication_label, refresh_publication,
@@ -362,10 +366,16 @@ def objects(request, pk):
             selected_cards,
             district_names=district_names,
         )
-    page = Paginator(recommendations, 20).get_page(request.GET.get("page"))
+    analysis = request.resolver_match.url_name == "analysis"
+    top = sorted((card for card in recommendations if card["catalog_group"] == "recommended"), key=top_order)[:5] if analysis else []
+    for position, card in enumerate(top, 1):
+        card["rank"] = position
+    page = Paginator(
+        [card for card in recommendations if card["catalog_group"] != "recommended"] if analysis else recommendations, 20,
+    ).get_page(request.GET.get("page"))
     groups = {
         group: [card for card in page if card["catalog_group"] == group]
-        for group in OUTCOME_GROUPS
+        for group in (*OUTCOME_GROUPS, "archived")
     }
     filter_params = request.GET.copy()
     filter_params.pop("page", None)
@@ -382,6 +392,10 @@ def objects(request, pk):
             "recommendation_groups": groups,
             "recommendation_counts": counts,
             "recommendation_page": page,
+            "analysis_mode": analysis,
+            "top": top,
+            "analysis_profiles": accessible(request).filter(archived=False).order_by("title", "pk") if analysis else (),
+            "analysis_url": reverse("analysis" if analysis else "objects", args=[pk]),
             "recommendation_filters": form,
             "catalog_count": catalog_count,
             "profile_districts": district_names,
@@ -556,8 +570,9 @@ def property_page(
             Q(agency__isnull=True) | Q(agency=request.member.agency), group=key
         ).order_by("id"):
             records = [o for o in observations if o.characteristic_id == c.pk]
-            live = [o for o in records if not o.superseded]
-            latest = live[-1] if live else None
+            live = [o for o in records if not o.superseded and o.scope == "premises" and o.source_type != "archive"]
+            trusted = [o for o in live if verified(o)]
+            latest = (trusted or live)[-1] if live else None
             entries.append(
                 {
                     "characteristic": c,
@@ -570,7 +585,7 @@ def property_page(
                     or any(d["code"] == c.code and d["primary"] for d in STANDARD),
                     "records": records,
                     "latest": latest,
-                    "conflict": len(
+                    "conflict": bool(latest and latest.status == "conflict") or len(
                         {
                             (
                                 o.value,
@@ -579,7 +594,7 @@ def property_page(
                                 o.unit,
                                 json.dumps(o.structured_value, sort_keys=True),
                             )
-                            for o in live
+                            for o in (trusted or live)
                             if o.status != "unknown"
                         }
                     )
@@ -617,6 +632,28 @@ def property_page(
             {"entry": publication, "label": publication_label(publication)}
             for publication in p.publications.order_by("pk")
         ]
+        listing = ctx["listing"]
+        ctx["listing_categories"] = [CATEGORY_NAMES[code] for code in listing.categories if code in CATEGORY_NAMES] if listing else []
+        ctx["structured_details"] = [
+            (label, listing.details[key]) for key, label in (
+                ("floors_total", "Этажность здания"), ("commercial_building_type", "Тип здания"),
+                ("building_class", "Класс здания"), ("commercial_layout", "Планировка"),
+                ("entrance_type", "Вход"), ("build_year", "Год постройки"), ("renovation", "Ремонт"),
+                ("heating", "Отопление"), ("parking", "Парковка"), ("lease_type", "Тип договора"),
+                ("rent_period", "Срок аренды"), ("tax_form", "Условия НДС"),
+                ("published_at", "Дата публикации"), ("business_center", "Бизнес-центр"),
+                ("prepayment", "Предоплата"), ("utilities_payer", "Кто оплачивает коммунальные услуги"),
+                ("area_text", "Площадь по объявлению"), ("bathroom", "Санузел"), ("elevators", "Лифты"),
+                ("security", "Охрана"), ("house_type", "Тип здания по объявлению"),
+            ) if listing and listing.details.get(key)
+        ]
+        latest_dates = next((
+            source["entry"].snapshot.get("details", {}) for source in ctx["publications"]
+            if source["entry"].active
+        ), {})
+        for key, label in (("updated_at", "Дата изменения"), ("last_seen", "Последняя проверка площадкой")):
+            if latest_dates.get(key):
+                ctx["structured_details"].append((label, latest_dates[key]))
         ctx["can_refresh_listing"] = bool(
             ctx["can_edit"]
             and settings.METRAPI_API_KEY
@@ -648,6 +685,22 @@ def property_page(
         )
     else:
         ctx["economics"] = economics(p)
+    if p.pk:
+        profiles = accessible(request).filter(archived=False).order_by("title", "pk")
+        analysis_profile = req
+        profile_id = request.GET.get("analysis_profile", "")
+        if not req and profile_id.isdecimal():
+            analysis_profile = get_object_or_404(profiles, pk=profile_id)
+        ctx["analysis_profiles"] = profiles
+        ctx["analysis_profile"] = analysis_profile
+        ctx["confirmation_today"] = timezone.localdate()
+        if analysis_profile:
+            active = any(source["entry"].active for source in ctx["publications"])
+            analysis_context = RequestPremises.objects.filter(request=analysis_profile, premises=p).first()
+            ctx["property_assessment"] = assess_premises(
+                analysis_profile, p, active_requirements(analysis_profile), observations,
+                context=analysis_context, preliminary=active,
+            )
     return render(request, "premises.html", ctx, status=status)
 
 
@@ -1404,52 +1457,117 @@ def healthz(request):
 
 
 def filtered_catalog(request):
-    from django.db.models import ExpressionWrapper, DecimalField
+    from django.db.models import BooleanField, Case, DecimalField, ExpressionWrapper, Prefetch, Value, When
     from django.db.models.functions import Coalesce
 
-    form = CatalogFilterForm(request.GET)
-    qs = catalog_scope(request).order_by("-updated_at")
+    form = SavedCatalogFilterForm(request.GET)
+    qs = with_availability(catalog_scope(request)).select_related("listing").order_by("-updated_at", "-pk")
     if not form.is_valid():
         return qs.none(), form
     d = form.cleaned_data
     if d.get("q"):
-        qs = qs.filter(label__icontains=d["q"])
+        qs = qs.filter(Q(label__icontains=d["q"]) | Q(listing__title__icontains=d["q"]))
     if d.get("premises_type"):
         qs = qs.filter(premises_type=d["premises_type"])
     if d.get("area_min") is not None:
         qs = qs.filter(area__gte=d["area_min"])
     if d.get("area_max") is not None:
         qs = qs.filter(area__lte=d["area_max"])
-    if d.get("rent_max") is not None:
+    if any(d.get(name) is not None for name in ("rent_min", "rent_max", "initial_max")):
+        money_field = DecimalField(max_digits=20, decimal_places=2)
         qs = qs.annotate(
             base_rent=Coalesce(
                 F("rent"),
                 ExpressionWrapper(
                     F("area") * F("rate"),
-                    output_field=DecimalField(max_digits=20, decimal_places=2),
+                    output_field=money_field,
                 ),
-            )
-        ).filter(base_rent__lte=d["rent_max"])
-    criteria = technical_filters(d)
+            ),
+            initial_payment=ExpressionWrapper(F("base_rent") + F("deposit"), output_field=money_field),
+        )
+    constraints = [
+        (key, lookup) for key, lookup in (
+            ("rent_min", "base_rent__gte"), ("rent_max", "base_rent__lte"),
+            ("deposit_min", "deposit__gte"), ("deposit_max", "deposit__lte"),
+            ("initial_max", "initial_payment__lte"),
+        ) if d.get(key) is not None
+    ]
+    unknown_condition = Q()
+    for key, lookup in constraints:
+        condition = Q(**{lookup: d[key]})
+        if d["include_unknown"]:
+            missing = Q(**{lookup.split("__")[0] + "__isnull": True})
+            condition |= missing
+            unknown_condition |= missing
+        qs = qs.filter(condition)
+    for field in ("city", "district", "floor"):
+        if d.get(field):
+            qs = qs.filter(**{field + "__iexact": d[field]})
+    if d.get("category"):
+        category = d["category"]
+        if connection.vendor == "postgresql":
+            qs = qs.filter(listing__categories__contains=[category])
+        else:
+            qs = qs.filter(pk__in=[p.pk for p in qs if category in getattr(getattr(p, "listing", None), "categories", [])])
+    availability = d.get("availability")
+    if availability == "active":
+        qs = qs.filter(Q(has_publications=False) | Q(has_active_publication=True) | staff_availability())
+    elif availability == "archived":
+        qs = qs.filter(has_publications=True, has_active_publication=False).exclude(staff_availability())
+    elif availability == "manual":
+        qs = qs.filter(has_publications=False)
+    criteria = {
+        code: d[field] for field, code in CATALOG_FLAGS.items() if d.get(field)
+    }
+    criteria.update({code: d[key] for key, code in (("height_min", "ceiling_height_m"), ("power_min", "power_kw")) if d.get(key) is not None})
     if criteria:
-        ids = [
-            p.pk
-            for p in qs
-            if all(check_requirement(r, p)["status"] == "pass" for r in criteria)
-        ]
-        qs = qs.filter(pk__in=ids)
+        candidates = qs.prefetch_related(Prefetch(
+            "observations", queryset=ranking_observations([], extra_codes=criteria).filter(superseded=False, scope="premises").exclude(source_type="archive"),
+            to_attr="catalog_observations",
+        ))
+        exact, uncertain = [], []
+        for obj in candidates.iterator(chunk_size=200):
+            statuses = [catalog_criterion(obj, code, expected) for code, expected in criteria.items()]
+            if "mismatch" not in statuses:
+                (uncertain if "unknown" in statuses else exact).append(obj.pk)
+        qs = qs.filter(pk__in=exact + (uncertain if d["include_unknown"] else []))
+        if d["include_unknown"]:
+            unknown_condition |= Q(pk__in=uncertain)
+    if unknown_condition:
+        qs = qs.annotate(catalog_unknown=Case(When(unknown_condition, then=Value(True)), default=Value(False), output_field=BooleanField())).order_by("catalog_unknown", "-updated_at", "-pk")
     return qs, form
+
+
+def catalog_criterion(obj, code, expected):
+    rows = [row for row in obj.catalog_observations if row.characteristic.code == code]
+    confirmed = [row for row in rows if verified(row)]
+    source = confirmed or [row for row in rows if row.source_type != "listing" or obj.has_active_publication]
+    numeric = isinstance(expected, Decimal)
+    values = {row.value if numeric else row.boolean for row in source} - {None}
+    known = len(values) == 1 and all(row.status != "conflict" for row in source)
+    if expected == "unknown":
+        return "mismatch" if known else "match"
+    if not known:
+        return "unknown"
+    value = values.pop()
+    matched = value >= expected if numeric else value == (expected == "yes")
+    return "match" if matched else "mismatch"
 
 
 @workspace
 @require_GET
 def all_premises(request):
     qs, form = filtered_catalog(request)
-    cards = [{"p": p, "economics": economics(p)} for p in qs]
+    page = Paginator(qs, 30).get_page(request.GET.get("page"))
+    params = request.GET.copy()
+    params.pop("page", None)
+    cards = [{"p": p, "economics": economics(p), "available": is_available(p),
+              "categories": [CATEGORY_NAMES[code] for code in getattr(getattr(p, "listing", None), "categories", []) if code in CATEGORY_NAMES]}
+             for p in page]
     return render(
         request,
         "all_premises.html",
-        {"cards": cards, "filter_form": form, "section": "all_premises"},
+        {"cards": cards, "filter_form": form, "section": "all_premises", "page": page, "filter_params": params.urlencode()},
     )
 
 
@@ -1741,34 +1859,6 @@ def business_setup(request, pk):
     return render(request, "business_setup.html", context)
 
 
-class MetrapiSearchForm(forms.Form):
-    locality = forms.CharField(label="Город", initial="Новосибирск", max_length=120)
-    query = forms.CharField(
-        label="Адрес или текст объявления", required=False, max_length=250
-    )
-    area_min = forms.DecimalField(
-        label="Площадь от, м²",
-        required=False,
-        min_value=0,
-        max_digits=14,
-        decimal_places=2,
-    )
-    area_max = forms.DecimalField(
-        label="Площадь до, м²",
-        required=False,
-        min_value=0,
-        max_digits=14,
-        decimal_places=2,
-    )
-
-    def clean(self):
-        data = super().clean()
-        lo, hi = data.get("area_min"), data.get("area_max")
-        if lo is not None and hi is not None and lo > hi:
-            self.add_error("area_max", "Верхняя граница меньше нижней.")
-        return data
-
-
 METRAPI_IMPORT_SALT = "leasefit.metrapi.import"
 METRAPI_SEARCH_SALT = "leasefit.metrapi.search"
 
@@ -1795,6 +1885,85 @@ def parser_member(user):
     ):
         raise PermissionDenied
     return member if member and member.active else None
+
+
+def parser_configurations(member):
+    if not member:
+        return []
+    ensure_schedule(member.agency_id)
+    return list(ParserConfiguration.objects.filter(agency_id=member.agency_id).select_related("agency").order_by("offset_minutes", "pk"))
+
+
+def schedule_context(configurations, bound_form=None, selected=None):
+    now = timezone.now()
+    paused = bool(configurations and configurations[0].agency.parser_paused)
+    entries = []
+    for configuration in configurations:
+        run = configuration.runs.order_by("-pk").first()
+        form = bound_form if configuration.pk == selected else ScheduleForm(initial={
+            "maximum": DEFAULT_MAXIMUM, **configuration.filters, "enabled": configuration.enabled,
+            "interval_minutes": configuration.interval_minutes, "offset_minutes": configuration.offset_minutes,
+            "priority": configuration.priority,
+        }, prefix=f"schedule-{configuration.pk}")
+        status = "Отключено" if not configuration.enabled else (
+            "В очереди" if configuration.next_run_at <= now else "Ожидает запуска"
+        )
+        if configuration.enabled and run and (run.status == "running" or configuration.next_run_at > now):
+            status = run.get_status_display()
+        if paused and configuration.enabled and not (run and run.status == "running"):
+            status = "Приостановлено"
+        entries.append({"config": configuration, "form": form, "run": run, "status": status,
+                        "delay": max(0, int((run.started_at - run.scheduled_at).total_seconds() / 60)) if run else None,
+                        "duration": int(((run.finished_at or now) - run.started_at).total_seconds()) if run else None,
+                        "history": list(configuration.runs.order_by("-pk")[:10])})
+    return {
+        "schedule": entries,
+        "schedule_paused": paused,
+        "schedule_zone": SCHEDULE_ZONE,
+        "schedule_next": min((c.next_run_at for c in configurations if c.enabled and not paused), default=None),
+        "schedule_success": max((c.last_success_at for c in configurations if c.last_success_at), default=None),
+        "schedule_selected": selected,
+    }
+
+
+@login_required
+@require_POST
+def parser_schedule_settings(request):
+    member = parser_member(request.user)
+    if member is None:
+        raise PermissionDenied
+    action = request.POST.get("action")
+    now = timezone.now()
+    if action in {"pause", "resume", "run"}:
+        configurations = ParserConfiguration.objects.filter(agency_id=member.agency_id)
+        if action in {"pause", "resume"}:
+            Agency.objects.filter(pk=member.agency_id).update(parser_paused=action == "pause")
+        else:
+            configurations.filter(enabled=True, next_run_at__gt=now).exclude(runs__status="running").update(next_run_at=now)
+        return redirect(reverse("parser") + "#parser-schedule")
+    with transaction.atomic():
+        config = get_object_or_404(
+            ParserConfiguration.objects.select_for_update(), agency_id=member.agency_id, pk=request.POST.get("configuration") if request.POST.get("configuration", "").isdecimal() else None,
+        )
+        form = ScheduleForm(request.POST, prefix=f"schedule-{config.pk}")
+        if form.is_valid():
+            previous = {key: value for key, value in config.filters.items() if key != "maximum"}
+            controls = ("enabled", "interval_minutes", "offset_minutes", "priority")
+            config.filters = form.saved_filters(exclude=controls)
+            if previous != {key: value for key, value in config.filters.items() if key != "maximum"}:
+                config.cursor = {}
+            for key in controls:
+                setattr(config, key, form.cleaned_data[key])
+            config.next_run_at = next_slot(now, config.interval_minutes, config.offset_minutes)
+            config.save()
+            messages.success(request, "Расписание сохранено.")
+            return redirect(reverse("parser") + "#parser-schedule")
+    return render(request, "parser.html", {
+        "section": "parser", "form": ManualSearchForm(), "listing_form": MetrapiListingForm(),
+        "configured": bool(settings.METRAPI_API_KEY), "can_import": True,
+        "local_showcase": settings.LEASEFIT_SHOWCASE,
+        **schedule_context(parser_configurations(member), form, config.pk),
+    }, status=400)
 
 
 @login_required
@@ -1827,7 +1996,7 @@ def parser_preview(request):
         ):
             raise PermissionDenied
         search_data = search["filters"]
-    form = MetrapiSearchForm(None if lookup else search_data)
+    form = ManualSearchForm(None if lookup else search_data)
     listing_form = MetrapiListingForm(data if lookup else None)
     active_form = listing_form if lookup else form
     results = None
@@ -1838,9 +2007,25 @@ def parser_preview(request):
                 results = [find_rental(listing_form.cleaned_data["url"])]
                 next_cursor = None
             else:
-                results, next_cursor = search_rentals(
-                    **form.cleaned_data, cursor=search["cursor"]
-                )
+                filters = form.saved_filters()
+                maximum = form.cleaned_data["maximum"]
+                legacy_fields = {"locality", "query", "area_min", "area_max", "availability"}
+                if filters.keys() <= legacy_fields and filters.get("availability") != "all":
+                    results, next_cursor = search_rentals(
+                        **{key: form.cleaned_data[key] for key in ("locality", "query", "area_min", "area_max")},
+                        cursor=search["cursor"],
+                    )
+                else:
+                    categories = filters.get("categories", [])
+                    results, next_cursor, _ = rental_page(
+                        api_filters(filters, categories), cursor=search["cursor"],
+                        limit=min(SEARCH_PAGE_SIZE, maximum - search["found"]) if maximum else SEARCH_PAGE_SIZE,
+                        include_inactive=filters.get("availability") == "all",
+                    )
+                    results = [item for item in results if matches(item, filters, categories)]
+                    if maximum and search["found"] + len(results) >= maximum:
+                        results = results[:maximum - search["found"]]
+                        next_cursor = None
         except MetrapiError as exc:
             active_form.add_error(None, str(exc))
         else:
@@ -1866,11 +2051,7 @@ def parser_preview(request):
             continuation = None
             if next_cursor is not None:
                 search["cursor"] = next_cursor
-                search["filters"] = {
-                    key: str(value)
-                    for key, value in form.cleaned_data.items()
-                    if value is not None
-                }
+                search["filters"] = form.saved_filters()
                 continuation = signing.dumps(search, salt=METRAPI_SEARCH_SALT)
                 auto_continue = True
     return render(
@@ -1888,6 +2069,7 @@ def parser_preview(request):
             "search": search,
             "continuation": continuation,
             "auto_continue": auto_continue,
+            **schedule_context(parser_configurations(member)),
         },
     )
 
@@ -1964,13 +2146,21 @@ def publication_history(request, object_id, publication_id):
         rows = [
             (label, display_value(snapshot[key]))
             for key, label in SNAPSHOT_FIELDS.items()
-            if key not in {"state", "description", "photos", "facts", "url", "group_id", "group_spread_m"}
-            and snapshot.get(key) not in {None, "", "unknown"}
+            if key not in {"state", "description", "photos", "facts", "url", "group_id", "group_spread_m", "details", "categories"}
+            and snapshot.get(key) not in (None, "", "unknown")
         ]
+        categories = [CATEGORY_NAMES[code] for code in snapshot.get("categories") or () if code in CATEGORY_NAMES]
+        if categories:
+            rows.append(("Назначение", ", ".join(categories)))
         for code, fact in (snapshot.get("facts") or {}).items():
             if code in {"area_sqm", "floor"}:
                 continue
-            value = fact.get("value", fact.get("text", fact.get("boolean")))
+            value = (
+                "Требует уточнения" if fact.get("conflicting")
+                else fact.get("value", fact.get("text", fact.get("boolean")))
+            )
+            if fact.get("structured_value"):
+                value = "Круглосуточно" if fact["structured_value"].get("mode") == "always" else value
             rows.append((facts.get(code, code), value))
         versions.append({"entry": version, "fields": rows})
     return render(request, "publication_history.html", {

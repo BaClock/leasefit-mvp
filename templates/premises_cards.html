@@ -3,14 +3,17 @@
   {% for card in cards %}
     <article class="request-card">
       <div class="card-top">
-        <span class="pill neutral">{{ card.p.get_premises_type_display }}</span>{% if card.ev %}<span class="pill {{ card.ev.result.status }}">{{ card.ev.result.label }}</span>{% endif %}</div>
+        <span class="pill neutral">{% if card.categories %}{{ card.categories|join:", " }}{% else %}{{ card.p.get_premises_type_display }}{% endif %}</span>{% if card.ev %}<span class="pill {{ card.ev.result.status }}">{{ card.ev.result.label }}</span>{% endif %}</div>
       <h2>
         <a href="{% if req %}
 {% url 'premises' req.pk card.p.pk %}
 {% else %}
 {% url 'catalog_premises' card.p.pk %}
-{% endif %}">{{ card.p.label }}</a>
+{% endif %}">{{ card.p.listing.title|default:card.p.label }}</a>
       </h2>
+      {% if card.p.listing.title and card.p.listing.title != card.p.label %}<p>{{ card.p.label }}</p>{% endif %}
+      {% if card.available is False %}<p class="pill clarify">Снято с публикации</p>{% endif %}
+      {% if card.p.catalog_unknown %}<p class="pill clarify">Совпадение требует уточнения</p>{% endif %}
       <p>Площадь: {{ card.p.area|default_if_none:'неизвестно' }} м² · Этаж: {{ card.p.floor|default:'не указан' }}</p>
       <div class="card-stats">
         <div>

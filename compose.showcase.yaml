@@ -28,6 +28,10 @@ services:
       CSRF_COOKIE_NAME: leasefit_showcase_csrf
       METRAPI_API_KEY: ${METRAPI_API_KEY:-}
       METRAPI_REFRESH_HOURS: ${METRAPI_REFRESH_HOURS:-1}
+      METRAPI_STATE_DIRECTORY: /var/lib/leasefit-metrapi
+      METRAPI_DAILY_LIMIT: ${METRAPI_DAILY_LIMIT:-100000}
+    volumes:
+      - metrapi_state:/var/lib/leasefit-metrapi
     ports:
       - "127.0.0.1:${LEASEFIT_DEMO_PORT:-8001}:8000"
     depends_on:
@@ -43,6 +47,8 @@ services:
     image: leasefit-showcase-web:latest
     pull_policy: never
     environment: *showcase_web_environment
+    volumes:
+      - metrapi_state:/var/lib/leasefit-metrapi
     command: ["python", "manage.py", "refresh_metrapi_listings"]
     depends_on:
       web:
@@ -50,3 +56,5 @@ services:
     restart: unless-stopped
 volumes:
   showcase_postgres:
+  metrapi_state:
+    name: leasefit-metrapi-state

@@ -3,10 +3,14 @@
 from collections import Counter
 from decimal import Decimal
 
-from django.db.models import Prefetch, Q
+from datetime import timedelta
+
+from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.utils import timezone
+from .listing_filters import CATEGORY_NAMES
 
 from .geography import district_key, districts_for_city, place_key, requested_districts
-from .models import Characteristic, Requirement
+from .models import Characteristic, ListingPublication, RequestPremises, Requirement
 from .outcomes import GROUPS, budget_excess, outcome_priority
 from .services import (
     assess_premises,
@@ -47,6 +51,49 @@ def for_request_city(catalog, req):
     return catalog
 
 
+def with_availability(catalog):
+    publications = ListingPublication.objects.filter(premises_id=OuterRef("pk"))
+    return catalog.annotate(
+        has_publications=Exists(publications),
+        has_active_publication=Exists(publications.filter(active=True)),
+    )
+
+
+def staff_availability():
+    return Q(availability_confirmed_on__gte=timezone.localdate() - timedelta(days=7))
+
+
+def is_available(obj):
+    return not obj.has_publications or obj.has_active_publication or bool(
+        obj.availability_confirmed_on and obj.availability_confirmed_on >= timezone.localdate() - timedelta(days=7)
+    )
+
+
+def category_rank(req, obj):
+    category, _, format_name = req.business_format.partition(".")
+    preferred = {
+        "food": {"catering", "retail", "free_purpose"},
+        "pickup": {"retail", "free_purpose", "warehouse"},
+        "retail": {"retail", "free_purpose"},
+        "service": {"retail", "free_purpose"},
+        "services": {"retail", "free_purpose"},
+        "office": {"office", "free_purpose"},
+        "production": {"manufacturing", "warehouse"},
+    }.get(category, set())
+    if "bak" in format_name:
+        preferred = preferred | {"manufacturing"}
+    listing = getattr(obj, "listing", None)
+    categories = set(listing.categories if listing else ())
+    return not bool(preferred.intersection(categories))
+
+
+def top_order(card):
+    return (
+        card["unclear_count"], score_order(card), Decimal(card["economics"]["monthly_total"]),
+        card["category_rank"], card["p"].pk,
+    )
+
+
 def technical_filters(filters):
     selected = {
         code: filters[field]
@@ -81,7 +128,7 @@ def recommend_catalog_premises(
     counts = Counter({group: 0 for group in GROUPS})
     if not any(row.priority == "required" for row in requirements):
         return [], counts
-    candidates = for_request_city(catalog, req)
+    candidates = with_availability(for_request_city(catalog, req)).select_related("listing")
     city_key = place_key(req.city)
     registered = districts_for_city(req.city)
     known_districts = {district_key(name) for name in registered}
@@ -107,6 +154,10 @@ def recommend_catalog_premises(
             candidates = candidates.filter(**{lookup: value})
     if filters.get("only_new"):
         candidates = candidates.exclude(pk__in=selected_cards)
+    if filters.get("availability") == "archived":
+        candidates = candidates.filter(has_publications=True, has_active_publication=False).exclude(staff_availability())
+    else:
+        candidates = candidates.filter(Q(has_publications=False) | Q(has_active_publication=True) | staff_availability())
     criteria = technical_filters(filters)
     candidates = candidates.prefetch_related(
         Prefetch(
@@ -119,11 +170,20 @@ def recommend_catalog_premises(
     )
 
     results = []
+    contexts = {
+        link.premises_id: link for link in RequestPremises.objects.filter(request=req, premises_id__in=selected_cards)
+    }
     for obj in candidates:
         district = district_key(obj.district)
+        preliminary = obj.has_active_publication
+        listing_location = preliminary and place_key(obj.city) == city_key and district in known_districts and not any(
+            row["key"] in {"city", "district", "label"} for row in obj.listing_conflicts
+        )
+        if preliminary and obj.city and city_key and place_key(obj.city) != city_key:
+            continue
         location_uncertain = bool(registered) and (
             district not in known_districts
-            or not obj.location_confirmed
+            or not (obj.location_confirmed or listing_location)
             or place_key(obj.city) != city_key
         )
         if (
@@ -133,13 +193,14 @@ def recommend_catalog_premises(
         ):
             continue
         observations = obj.ranking_observations
-        if criteria and assess_requirements(obj, criteria, observations)[0] != "pass":
+        if criteria and assess_requirements(obj, criteria, observations, preliminary=preliminary)[0] != "pass":
             continue
         card = (
             dict(selected_cards[obj.pk])
-            if obj.pk in selected_cards
-            else assess_premises(req, obj, requirements, observations, context=None)
+            if obj.pk in selected_cards and not obj.has_publications
+            else assess_premises(req, obj, requirements, observations, context=contexts.get(obj.pk), preliminary=preliminary)
         )
+        card["p"] = obj
         costs = card["economics"]
         if filters.get("monthly_max") is not None and (
             not costs["complete"]
@@ -148,14 +209,25 @@ def recommend_catalog_premises(
             continue
         if filters.get("only_confirmed") and not card["evidence"]["confirmed"]:
             continue
-        card["catalog_group"] = (
-            "location" if location_uncertain else card["outcome"]["group"]
-        )
+        available = is_available(obj)
+        card["catalog_group"] = "archived" if not available else "location" if location_uncertain else card["outcome"]["group"]
         counts[card["catalog_group"]] += 1
         if filters.get("status") and card["status"] != filters["status"]:
             continue
+        if filters.get("budget_state") and card["outcome"]["monthly"]["state"] != filters["budget_state"]:
+            continue
+        if filters.get("score_min") is not None and (card["score"] is None or card["score"] < filters["score_min"]):
+            continue
+        if filters.get("completeness") == "complete" and (card["unclear_count"] or not costs["complete"]):
+            continue
+        if filters.get("completeness") == "unknown" and not (card["unclear_count"] or not costs["complete"]):
+            continue
         card["selected"] = obj.pk in selected_cards
+        card["location_by_listing"] = listing_location and not obj.location_confirmed
         card["power"] = power_summary(observations)
+        card["category_rank"] = category_rank(req, obj)
+        listing = getattr(obj, "listing", None)
+        card["categories"] = [CATEGORY_NAMES[code] for code in (listing.categories if listing else ()) if code in CATEGORY_NAMES]
         results.append(card)
     results.sort(key=lambda card: sort_key(card, filters.get("sort")))
     return results, counts
@@ -163,7 +235,7 @@ def recommend_catalog_premises(
 
 def sort_key(card, mode):
     obj = card["p"]
-    status = (outcome_priority(card), budget_excess(card))
+    status = ((99, 99), ()) if card["catalog_group"] == "archived" else (outcome_priority(card), budget_excess(card))
     score = score_order(card)
     if mode == "monthly":
         costs = card["economics"]

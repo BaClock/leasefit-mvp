@@ -2,6 +2,8 @@
 {% load leasefit_tags %}
 {% block content %}
   <h1>Парсинг объявлений</h1>
+  <datalist id="metrapi-cities"><option value="Новосибирск"></option></datalist>
+  {% if schedule %}{% include "parser_schedule.html" %}{% endif %}
   {% if not configured %}
     <p class="hint">
       Для поиска добавьте <code>METRAPI_API_KEY</code>
@@ -20,7 +22,7 @@
   </section>
   <section class="panel">
     <details{% if not lookup %} open{% endif %}>
-      <summary>Поиск по городу и площади</summary>
+      <summary>Поиск объявлений аренды по фильтрам</summary>
       <form method="post">
         {% csrf_token %}
         <div class="form-grid">
@@ -65,6 +67,7 @@
         <article class="request-card">
           <h3>{{ item.title }}</h3>
           <p>{{ item.label }}</p>
+          {% if not item.active %}<p class="pill blocker">Снято с публикации</p>{% endif %}
           {% if item.district %}<p>Район по объявлению: {{ item.district }}</p>{% endif %}
           {% if item.url %}
             <p><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a></p>

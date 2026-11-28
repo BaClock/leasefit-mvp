@@ -7,7 +7,8 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
     apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core && \
     rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -r requirements.txt && \
-    useradd --create-home --uid 10001 leasefit && chown leasefit:leasefit /app
+    useradd --create-home --uid 10001 leasefit && chown leasefit:leasefit /app && \
+    install -d -o leasefit -g leasefit -m 0700 /var/lib/leasefit-metrapi
 COPY --chown=leasefit:leasefit . .
 USER leasefit
 RUN sed -i 's/\r$//' scripts/start.sh && \
