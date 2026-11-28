@@ -2,5 +2,5 @@
 {% block content %}
   {% if user.is_superuser %}
     <p>
-      <a href="{% url 'parser' %}">Парсинг объявлений — предварительный просмотр</a>
+      <a href="{% url 'parser' %}">Парсинг объявлений через Metrapi</a>
     </p>{% endif %}{{ block.super }}{% endblock %}

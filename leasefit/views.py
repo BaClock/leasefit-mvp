@@ -3,6 +3,8 @@ from datetime import timedelta
 from functools import wraps
 from pathlib import Path
 from django import forms
+from django.conf import settings
+from django.core import signing
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.models import User
@@ -16,7 +18,6 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.core.exceptions import PermissionDenied
-from django.core import signing
 from django.core.paginator import Paginator
 from .business import FORMATS, TEMPLATE_VERSION, recommendations
 from .business_forms import BusinessSetupForm
@@ -40,6 +41,7 @@ from .models import *
 from .forms import *
 from .services import *
 from .characteristics import GROUPS, STANDARD, resolve_characteristic
+from .metrapi import MetrapiError, find_rental, listing_reference, search_rentals
 
 
 def workspace(fn):
@@ -1717,13 +1719,217 @@ def business_setup(request, pk):
     return render(request, "business_setup.html", context)
 
 
-@login_required
-@require_GET
-def parser_preview(request):
-    m = getattr(request.user, "membership", None)
-    if not request.user.is_superuser and not (m and m.active and m.role == "manager"):
+class MetrapiSearchForm(forms.Form):
+    locality = forms.CharField(label="Город", initial="Новосибирск", max_length=120)
+    query = forms.CharField(
+        label="Адрес или текст объявления", required=False, max_length=250
+    )
+    area_min = forms.DecimalField(
+        label="Площадь от, м²",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    area_max = forms.DecimalField(
+        label="Площадь до, м²",
+        required=False,
+        min_value=0,
+        max_digits=14,
+        decimal_places=2,
+    )
+    limit = forms.TypedChoiceField(
+        label="Объявлений в выдаче",
+        choices=[(5, "5"), (10, "10"), (20, "20")],
+        coerce=int,
+        initial=10,
+    )
+
+    def clean(self):
+        data = super().clean()
+        lo, hi = data.get("area_min"), data.get("area_max")
+        if lo is not None and hi is not None and lo > hi:
+            self.add_error("area_max", "Верхняя граница меньше нижней.")
+        return data
+
+
+METRAPI_IMPORT_SALT = "leasefit.metrapi.import"
+
+
+class MetrapiListingForm(forms.Form):
+    url = forms.URLField(
+        label="Ссылка на объявление",
+        max_length=1500,
+        assume_scheme="https",
+        help_text="Авито, Циан, Домклик или Яндекс Недвижимость.",
+    )
+
+    def clean_url(self):
+        try:
+            return listing_reference(self.cleaned_data["url"])
+        except MetrapiError as exc:
+            raise forms.ValidationError(str(exc)) from None
+
+
+def parser_member(user):
+    member = getattr(user, "membership", None)
+    if not user.is_superuser and not (
+        member and member.active and member.role == "manager"
+    ):
         raise PermissionDenied
-    return render(request, "parser.html", {"section": "parser"})
+    return member if member and member.active else None
+
+
+def metrapi_import_key(agency_id, item):
+    return uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"leasefit/metrapi/{agency_id}/{item['source']}/{item['source_id']}",
+    )
+
+
+def existing_metrapi_card(catalog, key, url):
+    return (
+        catalog.filter(creation_key=key).first()
+        or catalog.filter(listing_url=url).order_by("pk").first()
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def parser_preview(request):
+    member = parser_member(request.user)
+    data = request.POST if request.method == "POST" else None
+    lookup = data is not None and data.get("mode") == "listing"
+    form = MetrapiSearchForm(None if lookup else data)
+    listing_form = MetrapiListingForm(data if lookup else None)
+    active_form = listing_form if lookup else form
+    results = None
+    if data is not None and active_form.is_valid():
+        try:
+            if lookup:
+                results = [find_rental(listing_form.cleaned_data["url"])]
+            else:
+                results = search_rentals(**form.cleaned_data)
+        except MetrapiError as exc:
+            active_form.add_error(None, str(exc))
+        else:
+            if member:
+                catalog = Premises.objects.filter(agency_id=member.agency_id)
+                for item in results:
+                    if all(
+                        item[field] for field in ("label", "source", "source_id", "url")
+                    ):
+                        existing = existing_metrapi_card(
+                            catalog,
+                            metrapi_import_key(member.agency_id, item),
+                            item["url"],
+                        )
+                        if existing:
+                            item["existing_id"] = existing.pk
+                            continue
+                        item["token"] = signing.dumps(
+                            {
+                                "user": request.user.pk,
+                                "agency": member.agency_id,
+                                "item": item,
+                            },
+                            salt=METRAPI_IMPORT_SALT,
+                        )
+    return render(
+        request,
+        "parser.html",
+        {
+            "section": "parser",
+            "form": form,
+            "listing_form": listing_form,
+            "lookup": lookup,
+            "configured": bool(settings.METRAPI_API_KEY),
+            "results": results,
+            "can_import": member is not None,
+        },
+    )
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def parser_import(request):
+    member = parser_member(request.user)
+    if member is None:
+        raise PermissionDenied("Для импорта необходимо активное агентство.")
+    try:
+        payload = signing.loads(
+            request.POST.get("listing", ""),
+            salt=METRAPI_IMPORT_SALT,
+            max_age=1800,
+        )
+    except signing.BadSignature:
+        messages.error(
+            request,
+            "Предпросмотр устарел или недействителен. Найдите объявление снова.",
+        )
+        return redirect("parser")
+    if payload["user"] != request.user.pk or payload["agency"] != member.agency_id:
+        raise PermissionDenied
+
+    item = payload["item"]
+    key = metrapi_import_key(member.agency_id, item)
+    catalog = Premises.objects.filter(agency_id=member.agency_id)
+    existing = existing_metrapi_card(catalog, key, item["url"])
+    if existing is not None:
+        messages.info(
+            request, "Объявление уже есть в каталоге. Открыта существующая карточка."
+        )
+        return redirect("catalog_premises", object_id=existing.pk)
+    source = f"Metrapi / {item['source_label']} / {item['source_id']}"
+    p, created = catalog.get_or_create(
+        creation_key=key,
+        defaults={
+            "agency_id": member.agency_id,
+            "label": item["label"],
+            "city": item["city"],
+            "district": item["district"],
+            "listing_url": item["url"],
+            "premises_type": item["premises_type"],
+            "area": item["area"],
+            "floor": item["floor"],
+            "rent": item["rent"],
+            "rate": item["rate"],
+            "deposit": item["deposit"],
+            "commission": item["commission"],
+            "vat_mode": item["vat_mode"],
+            "commercial_source_type": "listing",
+            "commercial_source": source,
+            "commercial_date": item["date"],
+            "commercial_status": "unverified",
+        },
+    )
+    if created:
+        for characteristic in Characteristic.objects.filter(
+            code__in=item["facts"], agency__isnull=True
+        ):
+            Observation.objects.create(
+                premises=p,
+                characteristic=characteristic,
+                name=characteristic.label,
+                unit=characteristic.unit,
+                source_type="listing",
+                source=source,
+                source_url=item["url"],
+                observed_on=item["date"],
+                status="unverified",
+                author=request.user,
+                **item["facts"][characteristic.code],
+            )
+        audit(request.user, "premises.metrapi_imported", p.pk)
+        messages.success(
+            request, "Карточка добавлена. Данные объявления требуют подтверждения."
+        )
+    else:
+        messages.info(
+            request, "Объявление уже есть в каталоге. Открыта существующая карточка."
+        )
+    return redirect("catalog_premises", object_id=p.pk)
 
 
 @workspace

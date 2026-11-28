@@ -119,3 +119,6 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 23 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 21 * 1024 * 1024
 PDF_FONT = os.getenv("PDF_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "")
+
+
+METRAPI_API_KEY = os.getenv("METRAPI_API_KEY", "").strip()

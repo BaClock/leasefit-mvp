@@ -1,12 +1,95 @@
 {% extends "base.html" %}
-{% block content %}<div class="eyebrow">ДЛЯ РУКОВОДИТЕЛЯ И АДМИНИСТРАТОРА</div>
-<h1>Парсинг объявлений</h1>
-<section class="panel narrow">
-  <span class="pill neutral">В разработке</span>
-  <h2>Перенос параметров из объявления</h2>
-  <p>В будущем здесь можно будет получить предложения значений из ссылки и проверить их перед сохранением. Объявление останется непроверенным источником.</p>
-  <button disabled>Запустить парсинг — скоро</button>
-  <p class="hint">Сейчас загрузка страниц и извлечение данных не выполняются. Добавьте помещение вручную и сохраните ссылку как источник.</p>
-  <a class="button secondary" href="{% url 'all_premises' %}">← Вернуться к помещениям</a>
-</section>
+{% load leasefit_tags %}
+{% block content %}
+  <h1>Парсинг объявлений</h1>
+  <p>Поиск коммерческой аренды в базе Metrapi. Проверьте данные и выберите объявление для каталога агентства.</p>
+  {% if not configured %}
+    <p class="hint">Для поиска задайте METRAPI_API_KEY на сервере.</p>
+  {% endif %}
+  <section class="panel">
+    <h2>Объявление по ссылке</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="listing">
+      {% include "fields.html" with form=listing_form %}
+      <button{% if not configured %} disabled{% endif %}>Найти по ссылке</button>
+    </form>
+  </section>
+  <section class="panel">
+    <details{% if not lookup %} open{% endif %}>
+      <summary>Поиск по городу и площади</summary>
+      <form method="post">
+        {% csrf_token %}
+        <div class="form-grid">
+          {% include "fields.html" %}
+        </div>
+        <button{% if not configured %} disabled{% endif %}>Найти объявления</button>
+      </form>
+    </details>
+  </section>
+  {% if results != None %}
+    <h2>Найдено в выборке: {{ results|length }}</h2>
+    {% if results and not can_import %}
+      <p class="hint">Для импорта необходимо активное агентство.</p>
+    {% endif %}
+    {% if results %}
+      <p class="hint">В карточку попадут распознанные значения. Система пометит их как сведения из объявления, которые требуют подтверждения.</p>
+    {% endif %}
+    <div class="request-grid">
+      {% for item in results %}
+        <article class="request-card">
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.label }} · {{ item.source_label }} · {{ item.date }}</p>
+          {% if item.district %}<p>Район по объявлению: {{ item.district }}</p>{% endif %}
+          {% if item.url %}
+            <p><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a></p>
+          {% endif %}
+          <dl>
+            <dt>Площадь и этаж</dt>
+            <dd>{{ item.area|default_if_none:"—" }} м² · этаж {{ item.floor|default:"—" }}</dd>
+            <dt>Цена в объявлении</dt>
+            <dd>{{ item.price|rub }} {{ item.price_unit }} {{ item.price_period }}</dd>
+            <dt>Цена для карточки</dt>
+            <dd>
+              {% if item.rent != None %}
+                {{ item.rent|rub }} / мес.
+              {% elif item.rate != None %}
+                {{ item.rate|rub }} / м² в месяц
+              {% else %}
+                Требует уточнения
+              {% endif %}
+            </dd>
+            {% if item.deposit_text or item.commission_text %}
+              <dt>Залог и комиссия в объявлении</dt>
+              <dd>{{ item.deposit_text|default:"—" }} · {{ item.commission_text|default:"—" }}</dd>
+            {% endif %}
+            {% if item.height or item.entrance or item.tax_form %}
+              <dt>Высота, вход, НДС</dt>
+              <dd>{{ item.height|default_if_none:"—" }} м · {{ item.entrance|default:"—" }} · {{ item.tax_form|default:"—" }}</dd>
+            {% endif %}
+            {% if item.power %}
+              <dt>Мощность из текста объявления</dt>
+              <dd>{{ item.power }} кВт · требует подтверждения</dd>
+            {% endif %}
+            {% if item.lease_type or item.heating or item.parking or item.commercial_layout or item.commercial_building_type %}
+              <dt>Дополнительные сведения для ручной проверки</dt>
+              <dd>{{ item.lease_type }} {{ item.heating }} {{ item.parking }} {{ item.commercial_layout }} {{ item.commercial_building_type }}</dd>
+            {% endif %}
+          </dl>
+          {% if item.existing_id %}
+            <a class="button secondary" href="{% url 'catalog_premises' item.existing_id %}">Открыть карточку в каталоге</a>
+          {% elif item.token %}
+            <form method="post" action="{% url 'parser_import' %}">
+              {% csrf_token %}
+              <input type="hidden" name="listing" value="{{ item.token }}">
+              <button>Добавить в каталог</button>
+            </form>
+          {% endif %}
+        </article>
+      {% empty %}
+        <p>В этой выборке нет помещений. Попробуйте изменить город или фильтры.</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <p><a href="{% url 'all_premises' %}">← Вернуться к помещениям</a></p>
 {% endblock %}

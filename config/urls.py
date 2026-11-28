@@ -97,6 +97,7 @@ urlpatterns = [
         name="business_template",
     ),
     path("app/parser", v.parser_preview, name="parser"),
+    path("app/parser/import", v.parser_import, name="parser_import"),
     path("app/requests/<int:pk>/refine", v.refine, name="refine"),
     path("app/requests", v.requests_list, name="requests"),
     path("app/requests/new", v.profile, name="request_new"),

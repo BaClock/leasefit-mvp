@@ -1143,13 +1143,13 @@ class AcceptanceTests(TestCase):
         self.assertNotIn("Ежемесячные платежи", text)
         self.assertNotIn("SECRET_INTERNAL_NOTE", text)
 
-    def test_parser_only_managers_or_superuser_without_fetching(self):
+    def test_parser_only_managers_or_superuser(self):
         self.assertEqual(self.client.get("/app/parser").status_code, 403)
         self.assertNotContains(self.client.get("/app/premises"), "Парсинг объявлений")
         self.client.force_login(self.manager)
         self.assertContains(
             self.client.get("/app/parser"),
-            "загрузка страниц и извлечение данных не выполняются",
+            "Найти объявления",
         )
         self.assertContains(self.client.get("/app/premises"), "Парсинг объявлений")
         self.manager.membership.active = False
