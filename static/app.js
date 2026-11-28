@@ -1,4 +1,56 @@
 document.addEventListener("DOMContentLoaded", () => {
+  for (const gallery of document.querySelectorAll("[data-listing-gallery]")) {
+    const photos = [...gallery.querySelectorAll(".listing-photo")];
+    const viewer = gallery.querySelector("dialog");
+    const image = viewer.querySelector("img");
+    const unavailable = viewer.querySelector("[data-listing-unavailable]");
+    const count = viewer.querySelector("[data-listing-count]");
+    let index = 0;
+
+    for (const [position, link] of photos.entries()) {
+      const thumb = link.querySelector("img");
+      const showMissing = () => {
+        thumb.hidden = true;
+        link.querySelector("span").hidden = false;
+      };
+      thumb.addEventListener("error", showMissing);
+      if (thumb.complete && !thumb.naturalWidth) showMissing();
+      link.addEventListener("click", (event) => {
+        if (!viewer.showModal || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        index = position;
+        showPhoto();
+        viewer.showModal();
+      });
+    }
+
+    function showPhoto() {
+      const link = photos[index];
+      image.hidden = false;
+      unavailable.hidden = true;
+      image.alt = link.querySelector("img").alt;
+      image.src = link.href;
+      count.textContent = `${index + 1} из ${photos.length}`;
+    }
+    const move = (step) => {
+      index = (index + step + photos.length) % photos.length;
+      showPhoto();
+    };
+    for (const button of viewer.querySelectorAll("[data-listing-step]")) {
+      button.addEventListener("click", () => move(Number(button.dataset.listingStep)));
+    }
+    viewer.querySelector("[data-listing-close]").addEventListener("click", () => viewer.close());
+    viewer.addEventListener("keydown", (event) => {
+      if (photos.length < 2 || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      move(event.key === "ArrowLeft" ? -1 : 1);
+    });
+    image.addEventListener("error", () => {
+      image.hidden = true;
+      unavailable.hidden = false;
+    });
+  }
+
   const reportType = document.getElementById("id_report_type");
   if (reportType) {
     const form = reportType.form;

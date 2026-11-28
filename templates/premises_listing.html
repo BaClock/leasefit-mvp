@@ -1,0 +1,51 @@
+<section class="panel listing-panel" aria-labelledby="listing-heading">
+  <div class="listing-heading">
+    <h2 id="listing-heading">Объявление</h2>
+    {% if listing.url %}
+      <a href="{{ listing.url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a>
+    {% elif p.listing_url %}
+      <a href="{{ p.listing_url }}" target="_blank" rel="noopener noreferrer">Оригинал объявления ↗</a>
+    {% endif %}
+  </div>
+  {% if listing.photos %}
+    <div data-listing-gallery>
+      <h3>Фото помещения</h3>
+      <div class="listing-photos">
+        {% for url in listing.photos %}
+          <a class="listing-photo" href="{{ url }}" target="_blank" rel="noopener noreferrer">
+            <img src="{{ url }}" alt="Фото помещения {{ forloop.counter }}" loading="lazy" referrerpolicy="no-referrer">
+            <span hidden>Фото {{ forloop.counter }} недоступно</span>
+          </a>
+        {% endfor %}
+      </div>
+      <dialog class="listing-viewer" aria-label="Фото помещения">
+        <div class="listing-viewer-toolbar">
+          <span data-listing-count aria-live="polite"></span>
+          <button type="button" class="secondary" data-listing-close autofocus>Закрыть</button>
+        </div>
+        <img alt="" referrerpolicy="no-referrer">
+        <p data-listing-unavailable hidden>Фото недоступно. Попробуйте открыть оригинал объявления.</p>
+        {% if listing.photos|length > 1 %}
+          <div class="listing-viewer-nav">
+            <button type="button" class="secondary" data-listing-step="-1">← Предыдущее</button>
+            <button type="button" class="secondary" data-listing-step="1">Следующее →</button>
+          </div>
+        {% endif %}
+      </dialog>
+    </div>
+  {% endif %}
+  {% if listing.description %}
+    <h3>Описание из объявления</h3>
+    <div class="listing-description">{{ listing.description }}</div>
+  {% endif %}
+  {% if not listing.photos and not listing.description %}
+    <p class="muted">Фото и описание ещё не загружены.</p>
+  {% endif %}
+  {% if can_refresh_listing %}
+    <form class="listing-refresh" method="post"
+          action="{% if req %}{% url 'listing_refresh' req.pk p.pk %}{% else %}{% url 'catalog_listing_refresh' p.pk %}{% endif %}">
+      {% csrf_token %}
+      <button class="secondary" type="submit">Обновить из объявления</button>
+    </form>
+  {% endif %}
+</section>

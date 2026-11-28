@@ -46,6 +46,11 @@ urlpatterns = [
     path("app/premises/new", v.start_premises, name="start_premises"),
     path("app/premises/<int:object_id>", v.premises_edit, name="catalog_premises"),
     path(
+        "app/premises/<int:object_id>/listing",
+        v.refresh_premises_listing,
+        name="catalog_listing_refresh",
+    ),
+    path(
         "app/premises/<int:object_id>/delete",
         v.delete_premises,
         name="delete_premises",
@@ -112,6 +117,11 @@ urlpatterns = [
         "app/requests/<int:pk>/objects/<int:object_id>",
         v.premises_edit,
         name="premises",
+    ),
+    path(
+        "app/requests/<int:pk>/objects/<int:object_id>/listing",
+        v.refresh_premises_listing,
+        name="listing_refresh",
     ),
     path(
         "app/requests/<int:pk>/objects/<int:object_id>/observations",

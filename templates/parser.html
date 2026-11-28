@@ -67,9 +67,13 @@
               <dt>Залог и комиссия в объявлении</dt>
               <dd>{{ item.deposit_text|default:"—" }} · {{ item.commission_text|default:"—" }}</dd>
             {% endif %}
-            {% if item.height or item.entrance or item.tax_form %}
-              <dt>Высота, вход, НДС</dt>
-              <dd>{{ item.height|default_if_none:"—" }} м · {{ item.entrance|default:"—" }} · {{ item.tax_form|default:"—" }}</dd>
+            {% if item.height %}
+              <dt>Высота потолков</dt>
+              <dd>{{ item.height }} м · {% if item.height_from_description %}из описания, {% endif %}требует подтверждения</dd>
+            {% endif %}
+            {% if item.entrance or item.tax_form %}
+              <dt>Вход, НДС</dt>
+              <dd>{{ item.entrance|default:"—" }} · {{ item.tax_form|default:"—" }}</dd>
             {% endif %}
             {% if item.power %}
               <dt>Мощность из текста объявления</dt>

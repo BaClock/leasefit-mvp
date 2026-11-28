@@ -1,7 +1,7 @@
 <article class="fact-card">
   <h3>{{ entry.characteristic.label }}{% if entry.characteristic.unit %}, {{ entry.characteristic.unit }}{% endif %}</h3>{% if entry.latest %}<p class="fact-value">{% if entry.latest.structure_display %}{{ entry.latest.structure_display }}{% elif entry.latest.value != None %}{{ entry.latest.value }}{% elif entry.latest.boolean != None %}{{ entry.latest.boolean|yesno:'Есть,Нет' }}{% else %}{{ entry.latest.text|default:'Неизвестно' }}{% endif %}</p>
   <p class="pill {% if entry.conflict %}clarify{% else %}neutral{% endif %}">{% if entry.conflict %}Конфликт источников{% else %}{{ entry.latest.get_status_display }}{% endif %}</p>
-  <p class="source">{{ entry.latest.source }} · {{ entry.latest.observed_on|date:'d.m.Y' }} · {{ entry.latest.get_scope_display }}</p>{% if entry.latest.source_type == "archive" %}<p class="warning-text">Архив: текущее состояние не подтверждено.</p>{% endif %}
+  <p class="source">{{ entry.latest.source }} · {{ entry.latest.observed_on|date:'d.m.Y' }} · {{ entry.latest.get_scope_display }}{% if entry.latest.source_type == "listing" and entry.latest.locator %} · {{ entry.latest.locator }}{% endif %}</p>{% if entry.latest.source_type == "archive" %}<p class="warning-text">Архив: текущее состояние не подтверждено.</p>{% endif %}
 {% else %}<p class="muted">Неизвестно</p>{% endif %}
 {% if can_edit %}<a href="?characteristic={{ entry.characteristic.code }}#evidence-form">Указать / уточнить →</a>{% endif %}
 {% if entry.records %}

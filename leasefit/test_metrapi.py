@@ -5,14 +5,17 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from .metrapi import preview_item
 from .models import (
     Agency,
     Characteristic,
+    ClientRequest,
     Membership,
     Observation,
     Premises,
+    RequestPremises,
     Requirement,
 )
 from .services import check_requirement
@@ -42,6 +45,8 @@ LISTING = {
     "phone": "CONTACT-NOT-FOR-IMPORT",
     "description": "Текст с неподтверждённой мощностью 50 кВт.",
 }
+PHOTO = "https://10.img.avito.st/listings/photo.jpg?cqp=public"
+LISTING_DESCRIPTION = "Сдаётся светлое помещение.\n\nВысота потолков 3 метра.\n<Замечание автора>"
 
 
 def api_response(payload, status=200):
@@ -271,3 +276,107 @@ class MetrapiTests(TestCase):
             preview_item({**LISTING, "description": "⚡ Mощность — 25 КBт"})["power"],
             "25.00",
         )
+
+    def test_ceiling_height_uses_only_an_unambiguous_description_as_fallback(self):
+        for description in (
+            "Высота потолков от 3 м",
+            "Высота потолков 3–4 м.",
+            "Высота потолков 3 м – 4 м.",
+            "Потолки 3 м. Высота потолков 4 м.",
+            "Площадь 30 м², потолки под отделку.",
+        ):
+            with self.subTest(description=description):
+                parsed = preview_item({**LISTING, "description": description, "ceiling_height": None})
+                self.assertNotIn("ceiling_height_m", parsed["facts"])
+        from_text = preview_item({**LISTING, "description": LISTING_DESCRIPTION, "ceiling_height": None})
+        self.assertEqual(from_text["height"], "3.00")
+        self.assertTrue(from_text["height_from_description"])
+        self.assertEqual(from_text["facts"]["ceiling_height_m"]["locator"], "Описание объявления")
+        structured = preview_item({**LISTING, "description": LISTING_DESCRIPTION})
+        self.assertEqual(structured["height"], "3.40")
+        self.assertFalse(structured["height_from_description"])
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_import_displays_listing_media_and_description_in_both_cards(self, conn):
+        item = {
+            **LISTING,
+            "description": LISTING_DESCRIPTION,
+            "ceiling_height": None,
+            "photos": [
+                PHOTO,
+                PHOTO,
+                "http://10.img.avito.st/insecure.jpg",
+                "https://img.avito.st@unrelated.example/photo.jpg",
+                "https://img.avito.st.invalid/photo.jpg",
+                "https://127.0.0.1/photo.jpg",
+                {"url": PHOTO},
+            ],
+        }
+        conn.return_value.getresponse.return_value = api_response({"items": [item]})
+        preview = self.client.post("/app/parser", self.search)
+        self.assertContains(preview, "из описания, требует подтверждения")
+        token = preview.context["results"][0]["token"]
+        self.client.post("/app/parser/import", {"listing": token})
+        p = Premises.objects.get()
+        self.assertEqual(p.listing.photos, [PHOTO])
+        self.assertEqual(p.listing.description, LISTING_DESCRIPTION)
+        height = p.observations.get(characteristic__code="ceiling_height_m")
+        self.assertEqual((height.status, height.value, height.locator), (
+            "unverified", Decimal("3"), "Описание объявления",
+        ))
+        req = ClientRequest.objects.create(title="Проверка", agency=self.agency, owner=self.manager)
+        RequestPremises.objects.create(request=req, premises=p)
+        for name, args in (("catalog_premises", [p.pk]), ("premises", [req.pk, p.pk])):
+            page = self.client.get(reverse(name, args=args))
+            self.assertContains(page, '<h3>Фото помещения</h3>', html=True)
+            self.assertContains(page, PHOTO)
+            self.assertContains(page, "Высота потолков 3 метра.")
+            self.assertContains(page, "&lt;Замечание автора&gt;")
+            height_entry = next(
+                entry for group in page.context["groups"] for entry in group["entries"]
+                if entry["characteristic"].code == "ceiling_height_m"
+            )
+            self.assertTrue(height_entry["primary"])
+        self.client.force_login(self.create_user("foreign", Agency.objects.create(name="Other"), "manager"))
+        self.assertEqual(self.client.get(reverse("catalog_premises", args=[p.pk])).status_code, 404)
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_refresh_existing_listing_preserves_confirmed_height_and_card(self, conn):
+        p = Premises.objects.create(
+            agency=self.agency, label="Ручное название", rent=100000, listing_url=LISTING["url"],
+            commercial_source="Metrapi / Авито / 12345",
+        )
+        height = Observation.objects.create(
+            premises=p, characteristic=Characteristic.objects.get(code="ceiling_height_m"),
+            name="Высота потолков", unit="м", value=4, source_type="owner", source="Собственник",
+            observed_on="2026-11-28", status="confirmed", confirmation="Актуальный ответ",
+            author=self.manager,
+        )
+        item = {**LISTING, "description": LISTING_DESCRIPTION, "photos": [PHOTO]}
+        conn.return_value.getresponse.return_value = api_response({"item": item})
+        url = reverse("catalog_listing_refresh", args=[p.pk])
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertRedirects(self.client.post(url), reverse("catalog_premises", args=[p.pk]))
+        p.refresh_from_db()
+        self.assertEqual((p.label, p.rent, p.version), ("Ручное название", Decimal("100000"), 1))
+        self.assertEqual(list(p.observations.all()), [height])
+        self.assertEqual(p.listing.photos, [PHOTO])
+        realtor = self.create_user("ordinary", self.agency, "realtor")
+        self.client.force_login(realtor)
+        self.assertEqual(self.client.post(url).status_code, 403)
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_refresh_old_import_fills_missing_height_once(self, conn):
+        p = Premises.objects.create(
+            agency=self.agency, label="Ранее импортированное помещение",
+            listing_url=LISTING["url"], commercial_source="Metrapi / Авито / 12345",
+        )
+        item = {**LISTING, "description": LISTING_DESCRIPTION, "photos": [PHOTO], "ceiling_height": None}
+        conn.return_value.getresponse.side_effect = [api_response({"item": item}), api_response({"item": item})]
+        url = reverse("catalog_listing_refresh", args=[p.pk])
+        for _ in range(2):
+            self.assertEqual(self.client.post(url).status_code, 302)
+        p.refresh_from_db()
+        self.assertEqual(p.version, 2)
+        self.assertEqual(p.observations.get(characteristic__code="ceiling_height_m").value, 3)
+        self.assertEqual(p.listing.description, LISTING_DESCRIPTION)

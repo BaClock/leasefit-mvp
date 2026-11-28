@@ -41,7 +41,10 @@ from .models import *
 from .forms import *
 from .services import *
 from .characteristics import GROUPS, STANDARD, resolve_characteristic
-from .metrapi import MetrapiError, find_rental, listing_reference, search_rentals
+from .metrapi import (
+    CEILING_HEIGHT_CODE, MetrapiError, find_rental, listing_reference, search_rentals,
+)
+from .metrapi_listings import premises_listing_reference, save_listing, source_name
 
 
 def workspace(fn):
@@ -556,6 +559,11 @@ def property_page(
                 {
                     "characteristic": c,
                     "primary": c.group == "custom"
+                    or (
+                        c.code == CEILING_HEIGHT_CODE
+                        and latest is not None
+                        and latest.value is not None
+                    )
                     or any(d["code"] == c.code and d["primary"] for d in STANDARD),
                     "records": records,
                     "latest": latest,
@@ -600,6 +608,14 @@ def property_page(
         "shared": shared,
         "use_count": p.request_links.count() if p.pk else 0,
     }
+    if p.pk:
+        ctx["listing"] = getattr(p, "listing", None)
+        ctx["can_refresh_listing"] = bool(
+            ctx["can_edit"]
+            and settings.METRAPI_API_KEY
+            and (request.user.is_superuser or request.member.role == "manager")
+            and premises_listing_reference(p)
+        )
     ctx["visible_requests"] = (
         accessible(request).filter(premises=p).distinct()
         if p.pk
@@ -1834,6 +1850,7 @@ def parser_preview(request):
                                 "item": item,
                             },
                             salt=METRAPI_IMPORT_SALT,
+                            compress=True,
                         )
     return render(
         request,
@@ -1875,14 +1892,16 @@ def parser_import(request):
 
     item = payload["item"]
     key = metrapi_import_key(member.agency_id, item)
-    catalog = Premises.objects.filter(agency_id=member.agency_id)
+    catalog = Premises.objects.select_for_update().filter(agency_id=member.agency_id)
     existing = existing_metrapi_card(catalog, key, item["url"])
     if existing is not None:
+        if getattr(existing, "listing", None) is None:
+            save_listing(existing, item, request.user, fill_height=True)
         messages.info(
             request, "Объявление уже есть в каталоге. Открыта существующая карточка."
         )
         return redirect("catalog_premises", object_id=existing.pk)
-    source = f"Metrapi / {item['source_label']} / {item['source_id']}"
+    source = source_name(item)
     p, created = catalog.get_or_create(
         creation_key=key,
         defaults={
@@ -1906,6 +1925,7 @@ def parser_import(request):
         },
     )
     if created:
+        save_listing(p, item, request.user)
         for characteristic in Characteristic.objects.filter(
             code__in=item["facts"], agency__isnull=True
         ):
@@ -1931,6 +1951,36 @@ def parser_import(request):
             request, "Объявление уже есть в каталоге. Открыта существующая карточка."
         )
     return redirect("catalog_premises", object_id=p.pk)
+
+
+@workspace
+@require_POST
+def refresh_premises_listing(request, object_id, pk=None):
+    parser_member(request.user)
+    req, p = property_load(request, pk, object_id, write=True)
+    reference = premises_listing_reference(p)
+    if reference is None:
+        raise Http404
+    try:
+        item = find_rental(reference)
+    except MetrapiError as exc:
+        messages.error(request, str(exc))
+        return property_redirect(req, p)
+    with transaction.atomic():
+        req, p = property_load(request, pk, object_id, write=True, lock=True)
+        if premises_listing_reference(p) != reference:
+            messages.warning(
+                request, "Источник объявления изменился. Повторите обновление."
+            )
+            return property_redirect(req, p)
+        changed = save_listing(p, item, request.user, fill_height=True)
+        if changed:
+            audit(request.user, "premises.metrapi_listing_updated", p.pk)
+    messages.success(
+        request,
+        "Материалы объявления обновлены." if changed else "Материалы объявления актуальны.",
+    )
+    return property_redirect(req, p)
 
 
 @workspace

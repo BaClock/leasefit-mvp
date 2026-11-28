@@ -291,6 +291,17 @@ class Premises(models.Model):
         return self.label
 
 
+class PremisesListing(models.Model):
+    premises = models.OneToOneField(
+        Premises, on_delete=models.CASCADE, primary_key=True, related_name="listing"
+    )
+    source = models.CharField(max_length=40)
+    source_id = models.CharField(max_length=80)
+    url = models.URLField(max_length=1500, blank=True)
+    description = models.TextField(blank=True)
+    photos = models.JSONField(default=list, blank=True)
+
+
 class RequestPremises(models.Model):
     request = models.ForeignKey(
         ClientRequest, on_delete=models.CASCADE, related_name="premises_links"

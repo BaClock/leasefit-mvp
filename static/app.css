@@ -1871,3 +1871,82 @@ button.district-tag:hover {
   columns: 2 14rem;
   padding-inline-start: 1.3rem;
 }
+
+.listing-heading,
+.listing-viewer-toolbar,
+.listing-viewer-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.listing-heading h2 {
+  margin-bottom: 0;
+}
+
+.listing-photos {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: min(14rem, 75%);
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.25rem 0.75rem;
+  scroll-snap-type: x proximity;
+}
+
+.listing-photo {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--card);
+  scroll-snap-align: start;
+}
+
+.listing-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.listing-description {
+  max-width: 90ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.listing-refresh {
+  margin-top: 1rem;
+}
+
+.listing-viewer {
+  width: min(64rem, calc(100% - 1.5rem));
+  max-height: calc(100dvh - 1.5rem);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--section);
+  color: var(--text);
+}
+
+.listing-viewer::backdrop {
+  background: rgb(15 24 41 / 75%);
+}
+
+.listing-viewer img {
+  display: block;
+  width: 100%;
+  max-height: min(65dvh, 40rem);
+  margin: 0.75rem 0;
+  object-fit: contain;
+  background: var(--card);
+}
+
+.listing-photo img[hidden],
+.listing-viewer img[hidden] {
+  display: none;
+}

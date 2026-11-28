@@ -30,6 +30,24 @@ LISTING_LINKS = {
     "domclick.ru": ("domclick", r"(?:^|__)([0-9]{1,24})$"),
     "realty.yandex.ru": ("yandex", r"^([0-9]{1,24})$"),
 }
+PHOTO_DOMAINS = {
+    "avito": ("img.avito.st",),
+    "cian": ("cdn-cian.ru", "cian.ru"),
+    "domclick": ("img.dmclk.ru", "domclick.ru"),
+    "yandex": ("avatars.mds.yandex.net",),
+    "farpost": ("farpost.ru",),
+    "move": ("move.ru",),
+    "sob": ("sob.ru",),
+    "youla": ("youla.ru",),
+}
+CEILING_HEIGHT_CODE = "ceiling_height_m"
+CEILING_IN_DESCRIPTION = re.compile(
+    r"\b(?:высота\s+потолк(?:а|ов)|потолки(?:\s+высотой)?)\s*"
+    r"(?:[:=–—-]\s*|составляет\s+)?"
+    r"([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*(?:метр(?:а|ов)?|м)\b"
+    r"(?!\.?\s*(?:[-–—]\s*[0-9]|(?:до|или|и)\s+[0-9]|[0-9]+\s*см))",
+    re.IGNORECASE,
+)
 POWER_IN_DESCRIPTION = re.compile(
     r"(?:^|[\n;.!?])\s*(?:[•·*⚡–—-]\s*)?"
     r"(?:выделенная(?: электрическая)? мощность|электрическая мощность|электромощность"
@@ -48,6 +66,8 @@ PURPOSES = {
 }
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_SHORT_RETRY_SECONDS = 3
+MAX_LISTING_DESCRIPTION = 32000
+MAX_LISTING_PHOTOS = 80
 
 
 class MetrapiError(Exception):
@@ -120,6 +140,8 @@ def listing_reference(url):
 
 def find_rental(reference):
     source, source_id = reference
+    if source not in SOURCES or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", source_id):
+        raise MetrapiError("Не удалось определить площадку или номер объявления.")
     error = (
         "Metrapi не нашёл это объявление. Проверьте ссылку или воспользуйтесь поиском."
     )
@@ -254,6 +276,47 @@ def source_date(item):
     return today.isoformat()
 
 
+def photo_urls(source, values):
+    if not isinstance(values, list):
+        return []
+    valid = {}
+    domains = PHOTO_DOMAINS.get(source, ())
+    for value in values:
+        if not isinstance(value, str) or not 0 < len(value) <= 2048:
+            continue
+        try:
+            URLValidator(schemes=["https"])(value)
+            parts = urlsplit(value)
+            host = parts.hostname
+            if (
+                parts.username is not None
+                or parts.password is not None
+                or parts.port is not None
+                or not host
+                or not any(
+                    host == domain or host.endswith("." + domain) for domain in domains
+                )
+            ):
+                continue
+        except (ValueError, ValidationError):
+            continue
+        valid[value] = None
+        if len(valid) >= MAX_LISTING_PHOTOS:
+            break
+    return list(valid)
+
+
+def ceiling_height_from_description(description):
+    matches = {
+        decimal_value(match[1].replace(",", "."))
+        for match in CEILING_IN_DESCRIPTION.finditer(description)
+    }
+    if len(matches) != 1:
+        return None
+    height = matches.pop()
+    return height if height is not None and Decimal(height) > 0 else None
+
+
 def preview_item(item):
     unit = to_text(item.get("price_unit")).lower()
     period = to_text(item.get("price_period")).lower()
@@ -291,20 +354,31 @@ def preview_item(item):
         facts["area_sqm"] = {"value": area}
     if floor:
         facts["floor"] = {"text": floor}
+    raw_description = item.get("description")
+    description = (
+        raw_description.replace("\x00", "")[:MAX_LISTING_DESCRIPTION]
+        if isinstance(raw_description, str)
+        else ""
+    )
     height = decimal_value(item.get("ceiling_height"))
-    if height and Decimal(height) > 0:
-        facts["ceiling_height_m"] = {"value": height}
+    height_from_description = False
+    if height is None or Decimal(height) <= 0:
+        height = ceiling_height_from_description(description)
+        height_from_description = height is not None
+    if height is not None:
+        facts[CEILING_HEIGHT_CODE] = {"value": height}
+        if height_from_description:
+            facts[CEILING_HEIGHT_CODE]["locator"] = "Описание объявления"
     entrance = to_text(item.get("entrance_type"))
     if entrance.casefold() in {"отдельный", "общий"}:
         facts["separate_entrance"] = {"boolean": entrance.casefold() == "отдельный"}
 
-    description = item.get("description")
     power = None
-    if isinstance(description, str):
+    if isinstance(raw_description, str):
         matches = {
             decimal_value(match[1].replace(",", "."))
             for match in POWER_IN_DESCRIPTION.finditer(
-                description.casefold().translate(CYRILLIC_LOOKALIKES)
+                raw_description.casefold().translate(CYRILLIC_LOOKALIKES)
             )
         }
         if len(matches) == 1:
@@ -341,6 +415,9 @@ def preview_item(item):
         "commission_text": to_text(item.get("commission")),
         "commission": ruble_amount(item.get("commission"), "без комиссии"),
         "height": height,
+        "height_from_description": height_from_description,
+        "description": description,
+        "photos": photo_urls(source, item.get("photos")),
         "entrance": entrance,
         "power": power,
         "facts": facts,
