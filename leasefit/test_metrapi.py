@@ -2,7 +2,6 @@ import json
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
-from urllib.error import HTTPError
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -45,6 +44,12 @@ LISTING = {
 }
 
 
+def api_response(payload, status=200):
+    response = BytesIO(json.dumps(payload).encode())
+    response.status = status
+    return response
+
+
 @override_settings(METRAPI_API_KEY="mock-key")
 class MetrapiTests(TestCase):
     def setUp(self):
@@ -58,18 +63,17 @@ class MetrapiTests(TestCase):
         Membership.objects.create(user=user, agency=agency, role=role)
         return user
 
-    @patch("leasefit.metrapi.build_opener")
-    def test_import_preserves_source_financial_units_and_agency(self, opener):
-        opener.return_value.open.return_value = BytesIO(
-            json.dumps({"items": [LISTING]}).encode()
-        )
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_import_preserves_source_financial_units_and_agency(self, conn):
+        conn.return_value.getresponse.return_value = api_response({"items": [LISTING]})
         response = self.client.post("/app/parser", self.search)
         self.assertContains(response, "Добавить в каталог")
         self.assertNotContains(response, "CONTACT-NOT-FOR-IMPORT")
-        request = opener.return_value.open.call_args.args[0]
-        self.assertEqual(request.host, "api.metrapi.ru")
-        self.assertEqual(request.get_header("X-api-key"), "mock-key")
-        self.assertIn("realty_type=commercial&deal_type=rent", request.full_url)
+        conn.assert_called_once_with("api.metrapi.ru", timeout=10)
+        request = conn.return_value.request.call_args
+        self.assertEqual(request.kwargs["headers"]["X-Api-Key"], "mock-key")
+        self.assertNotIn("Connection", request.kwargs["headers"])
+        self.assertIn("realty_type=commercial&deal_type=rent", request.args[1])
         token = response.context["results"][0]["token"]
         self.assertFalse(Premises.objects.exists())
         self.assertEqual(
@@ -120,13 +124,11 @@ class MetrapiTests(TestCase):
         self.assertEqual(
             self.client.post("/app/parser/import", {"listing": token}).status_code, 403
         )
-        self.assertEqual(opener.return_value.open.call_count, 1)
+        self.assertEqual(conn.return_value.request.call_count, 1)
 
-    @patch("leasefit.metrapi.build_opener")
-    def test_rate_limit_and_invalid_import_do_not_create_properties(self, opener):
-        opener.return_value.open.side_effect = HTTPError(
-            "https://api.metrapi.ru/v1/items", 429, "Too Many Requests", {}, None
-        )
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_rate_limit_and_invalid_import_do_not_create_properties(self, conn):
+        conn.return_value.getresponse.return_value = api_response({}, status=429)
         response = self.client.post("/app/parser", self.search)
         self.assertContains(response, "Достигнут лимит запросов Metrapi")
         self.assertEqual(
@@ -136,47 +138,51 @@ class MetrapiTests(TestCase):
         self.assertFalse(Premises.objects.exists())
 
     @patch("leasefit.metrapi.sleep")
-    @patch("leasefit.metrapi.build_opener")
-    def test_short_rate_limit_retries_the_lookup_once(self, opener, sleep):
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_short_rate_limit_retries_the_lookup_once(self, conn, sleep):
         def throttle():
-            return HTTPError(
-                "https://api.metrapi.ru/v1/items",
-                429,
-                "Too Many Requests",
-                {},
-                BytesIO(b'{"detail":{"reason":"too_soon","retry_after":2}}'),
+            return api_response(
+                {"detail": {"reason": "too_soon", "retry_after": 2}},
+                status=429,
             )
 
-        call = opener.return_value.open
-        call.side_effect = [throttle(), BytesIO(json.dumps({"items": [LISTING]}).encode())]
-        self.assertContains(self.client.post("/app/parser", self.search), "Добавить в каталог")
-        self.assertEqual(call.call_count, 2)
-        self.assertIs(call.call_args_list[0].args[0], call.call_args_list[1].args[0])
+        replies = conn.return_value.getresponse
+        replies.side_effect = [throttle(), api_response({"items": [LISTING]})]
+        response = self.client.post("/app/parser", self.search)
+        self.assertContains(response, "Добавить в каталог")
+        requests = conn.return_value.request.call_args_list
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0], requests[1])
         sleep.assert_called_once_with(2.1)
 
-        call.reset_mock(side_effect=True)
+        replies.reset_mock(side_effect=True)
         sleep.reset_mock()
-        call.side_effect = [throttle(), throttle()]
+        replies.side_effect = [throttle(), throttle()]
         response = self.client.post("/app/parser", self.search)
         self.assertContains(response, "Достигнут лимит запросов Metrapi")
-        self.assertEqual(call.call_count, 2)
+        self.assertEqual(replies.call_count, 2)
         sleep.assert_called_once()
 
     @patch("leasefit.metrapi.sleep")
-    @patch("leasefit.metrapi.build_opener")
-    def test_daily_quota_is_not_retried(self, opener, sleep):
-        call = opener.return_value.open
-        call.side_effect = HTTPError(
-            "https://api.metrapi.ru/v1/items",
-            429,
-            "Too Many Requests",
-            {},
-            BytesIO(b'{"detail":"daily limit exceeded"}'),
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_daily_quota_is_not_retried(self, conn, sleep):
+        reply = conn.return_value.getresponse
+        reply.return_value = api_response(
+            {"detail": "daily limit exceeded"}, status=429
         )
         response = self.client.post("/app/parser", self.search)
         self.assertContains(response, "Достигнут лимит запросов Metrapi")
-        call.assert_called_once()
+        reply.assert_called_once()
         sleep.assert_not_called()
+
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_unexpected_redirect_is_not_followed(self, conn):
+        conn.return_value.getresponse.return_value = api_response({}, status=302)
+        response = self.client.post("/app/parser", self.search)
+        self.assertContains(response, "Metrapi вернул ошибку HTTP 302")
+        conn.assert_called_once_with("api.metrapi.ru", timeout=10)
+        conn.return_value.request.assert_called_once()
+        conn.return_value.close.assert_called_once()
 
     def test_price_mapping_does_not_guess_missing_unit_periods(self):
         self.assertIsNone(preview_item({**LISTING, "price_period": None})["rate"])
@@ -186,16 +192,17 @@ class MetrapiTests(TestCase):
             "18000.00",
         )
 
-    @patch("leasefit.metrapi.build_opener")
+    @patch("leasefit.metrapi.HTTPSConnection")
     def test_direct_lookup_imports_power_as_unverified_and_links_existing_card(
-        self, opener
+        self, conn
     ):
         item = {
             **LISTING,
             "description": "Отдельное помещение.\n· Электроснабжение: 25,5 кВт",
         }
-        reply = json.dumps({"item": item}).encode()
-        opener.return_value.open.side_effect = [BytesIO(reply), BytesIO(reply)]
+        conn.return_value.getresponse.side_effect = [
+            api_response({"item": item}), api_response({"item": item}),
+        ]
         form = {
             "mode": "listing",
             "url": "https://www.avito.ru/novosibirsk/kommercheskaya_nedvizhimost/test_12345?tracking=example",
@@ -203,8 +210,8 @@ class MetrapiTests(TestCase):
         response = self.client.post("/app/parser", form)
         self.assertContains(response, "25.50 кВт")
         self.assertEqual(
-            opener.return_value.open.call_args.args[0].full_url,
-            "https://api.metrapi.ru/v1/item/avito/12345",
+            conn.return_value.request.call_args.args,
+            ("GET", "/v1/item/avito/12345"),
         )
         token = response.context["results"][0]["token"]
         self.assertEqual(
@@ -227,8 +234,8 @@ class MetrapiTests(TestCase):
         self.assertContains(response, "Открыть карточку в каталоге")
         self.assertNotContains(response, "Добавить в каталог")
 
-    @patch("leasefit.metrapi.build_opener")
-    def test_direct_lookup_rejects_unrelated_hosts_and_non_rentals(self, opener):
+    @patch("leasefit.metrapi.HTTPSConnection")
+    def test_direct_lookup_rejects_unrelated_hosts_and_non_rentals(self, conn):
         response = self.client.post(
             "/app/parser",
             {
@@ -237,9 +244,9 @@ class MetrapiTests(TestCase):
             },
         )
         self.assertContains(response, "Нужна прямая ссылка")
-        opener.assert_not_called()
-        opener.return_value.open.return_value = BytesIO(
-            json.dumps({"item": {**LISTING, "deal_type": "sale"}}).encode()
+        conn.assert_not_called()
+        conn.return_value.getresponse.return_value = api_response(
+            {"item": {**LISTING, "deal_type": "sale"}}
         )
         response = self.client.post(
             "/app/parser", {"mode": "listing", "url": LISTING["url"]}

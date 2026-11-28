@@ -3,10 +3,9 @@
 import json
 import re
 from decimal import Decimal, InvalidOperation
+from http.client import HTTPException, HTTPSConnection
 from time import sleep
-from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -14,7 +13,7 @@ from django.core.validators import URLValidator
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-API_ROOT = "https://api.metrapi.ru/v1"
+API_HOST = "api.metrapi.ru"
 SOURCES = {
     "avito": "Авито",
     "cian": "Циан",
@@ -57,11 +56,6 @@ class MetrapiError(Exception):
 
 class ListingNotFound(MetrapiError):
     pass
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 def search_rentals(*, locality, query="", area_min=None, area_max=None, limit=10):
@@ -149,56 +143,65 @@ def find_rental(reference):
 def get_payload(path):
     if not settings.METRAPI_API_KEY:
         raise MetrapiError("Для поиска задайте METRAPI_API_KEY на сервере.")
-    req = Request(
-        f"{API_ROOT}{path}",
-        headers={"X-Api-Key": settings.METRAPI_API_KEY, "Accept": "application/json"},
-    )
-    # The destination is fixed; never forward the key across redirects.
-    opener = build_opener(NoRedirect())
     try:
-        try:
-            payload = read_payload(opener, req)
-        except HTTPError as exc:
-            delay = short_retry_delay(exc)
-            if delay is None:
-                raise
-            sleep(delay)
-            payload = read_payload(opener, req)
-    except HTTPError as exc:
-        if exc.code == 404 and path.startswith("/item/"):
-            raise ListingNotFound from None
-        if exc.code in {401, 403}:
-            raise MetrapiError("Metrapi отклонил ключ или доступ к API.") from None
-        if exc.code == 429:
-            raise MetrapiError(
-                "Достигнут лимит запросов Metrapi. Повторите позже."
-            ) from None
-        raise MetrapiError(f"Metrapi вернул ошибку HTTP {exc.code}.") from None
-    except (URLError, OSError, ValueError):
+        status, data = read_payload(path)
+        if status == 429:
+            delay = short_retry_delay(data)
+            if delay is not None:
+                sleep(delay)
+                status, data = read_payload(path)
+    except (OSError, HTTPException):
         raise MetrapiError(
             "Не удалось получить данные Metrapi. Повторите позже."
         ) from None
 
+    if status == 404 and path.startswith("/item/"):
+        raise ListingNotFound
+    if status in {401, 403}:
+        raise MetrapiError("Metrapi отклонил ключ или доступ к API.")
+    if status == 429:
+        raise MetrapiError("Достигнут лимит запросов Metrapi. Повторите позже.")
+    if status != 200:
+        raise MetrapiError(f"Metrapi вернул ошибку HTTP {status}.")
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise MetrapiError("Ответ Metrapi слишком большой. Уменьшите размер выборки.")
+    try:
+        payload = json.loads(data, parse_float=Decimal)
+    except ValueError:
+        raise MetrapiError("Metrapi вернул неожиданный формат ответа.") from None
     if not isinstance(payload, dict):
         raise MetrapiError("Metrapi вернул неожиданный формат ответа.")
     return payload
 
 
-def read_payload(opener, request):
-    with opener.open(request, timeout=10) as response:
-        data = response.read(MAX_RESPONSE_BYTES + 1)
-    if len(data) > MAX_RESPONSE_BYTES:
-        raise MetrapiError("Ответ Metrapi слишком большой. Уменьшите размер выборки.")
-    return json.loads(data, parse_float=Decimal)
-
-
-def short_retry_delay(error):
-    if error.code != 429 or error.fp is None:
-        return None
+def read_payload(path):
+    # Metrapi response reads can hang when the request sends Connection: close.
+    # This client uses the fixed host and closes the socket after reading.
+    conn = HTTPSConnection(API_HOST, timeout=10)
     try:
-        with error:
-            payload = json.loads(error.read(2048))
-    except (OSError, ValueError):
+        conn.request(
+            "GET",
+            f"/v1{path}",
+            headers={
+                "X-Api-Key": settings.METRAPI_API_KEY,
+                "Accept": "application/json",
+                "User-Agent": "LeaseFIT",
+            },
+        )
+        with conn.getresponse() as response:
+            if response.status == 200:
+                return response.status, response.read(MAX_RESPONSE_BYTES + 1)
+            if response.status == 429:
+                return response.status, response.read(2048)
+            return response.status, b""
+    finally:
+        conn.close()
+
+
+def short_retry_delay(data):
+    try:
+        payload = json.loads(data)
+    except ValueError:
         return None
     detail = payload.get("detail") if isinstance(payload, dict) else None
     if isinstance(detail, dict) and detail.get("reason") == "too_soon":
