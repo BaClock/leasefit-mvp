@@ -85,8 +85,9 @@ def discover(config, run, user):
                 break
             limit = min(PAGE_SIZE, remaining)
             feed = state["mode"] == "feed"
+            position = state.get("position")
             rows, cursor, received = rental_page(
-                params, cursor=state.get("position"), since=state.get("since") if feed else None,
+                params, cursor=position, since=state.get("since") if feed else None,
                 feed=feed, limit=limit,
             )
             items = [row for row in rows if valid_item(row) and matches(row, filters, categories)]
@@ -112,8 +113,8 @@ def discover(config, run, user):
                 current.save(update_fields=["cursor"])
                 run.stats = stats
                 run.save(update_fields=["stats"])
-            # An empty filtered feed page may still advance the cursor over other categories.
-            if feed and received == 0:
+            # A filtered page can be empty before the end of the global feed.
+            if feed and received == 0 and cursor == position:
                 status = "complete"
                 break
     except CursorExpired as exc:

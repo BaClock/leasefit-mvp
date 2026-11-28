@@ -69,6 +69,7 @@ class AutomationTests(TestCase):
             ([], None, 0),
             ([self.item("2", price=47500)], 27, 1),
             ([], 35, 0),
+            ([], 35, 0),
         ]
         due()
         self.assertEqual(config.cursor["position"], "after-import")
@@ -84,6 +85,7 @@ class AutomationTests(TestCase):
         due()
         self.assertEqual(config.cursor["position"], 35)
         self.assertIsNotNone(config.last_success_at)
+        self.assertEqual(page.call_args.kwargs["cursor"], 35)
 
     @patch("leasefit.metrapi.get_payload")
     def test_only_documented_category_query_and_archival_parameter(self, payload):

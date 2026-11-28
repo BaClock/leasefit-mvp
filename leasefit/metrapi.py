@@ -136,6 +136,8 @@ def rental_page(params, *, cursor=None, since=None, feed=False, limit=SEARCH_PAG
         )
     ) or (feed and next_cursor is None) or (not feed and next_cursor is not None and cursor == next_cursor):
         raise MetrapiError("Metrapi вернул некорректную страницу объявлений.")
+    if feed and items and cursor == next_cursor:
+        raise MetrapiError("Курсор ленты Metrapi не продвинулся.")
     return [
         preview_item(item) for item in items
         if is_commercial_rental(item, include_inactive=include_inactive)
