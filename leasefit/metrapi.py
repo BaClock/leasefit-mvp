@@ -3,6 +3,7 @@
 import json
 import re
 from decimal import Decimal, InvalidOperation
+from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -47,6 +48,7 @@ PURPOSES = {
     "free_purpose": "other",
 }
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_SHORT_RETRY_SECONDS = 3
 
 
 class MetrapiError(Exception):
@@ -151,15 +153,17 @@ def get_payload(path):
         f"{API_ROOT}{path}",
         headers={"X-Api-Key": settings.METRAPI_API_KEY, "Accept": "application/json"},
     )
+    # The destination is fixed; never forward the key across redirects.
+    opener = build_opener(NoRedirect())
     try:
-        # The destination is fixed; never forward the key across redirects.
-        with build_opener(NoRedirect()).open(req, timeout=10) as response:
-            data = response.read(MAX_RESPONSE_BYTES + 1)
-        if len(data) > MAX_RESPONSE_BYTES:
-            raise MetrapiError(
-                "Ответ Metrapi слишком большой. Уменьшите размер выборки."
-            )
-        payload = json.loads(data, parse_float=Decimal)
+        try:
+            payload = read_payload(opener, req)
+        except HTTPError as exc:
+            delay = short_retry_delay(exc)
+            if delay is None:
+                raise
+            sleep(delay)
+            payload = read_payload(opener, req)
     except HTTPError as exc:
         if exc.code == 404 and path.startswith("/item/"):
             raise ListingNotFound from None
@@ -178,6 +182,30 @@ def get_payload(path):
     if not isinstance(payload, dict):
         raise MetrapiError("Metrapi вернул неожиданный формат ответа.")
     return payload
+
+
+def read_payload(opener, request):
+    with opener.open(request, timeout=10) as response:
+        data = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise MetrapiError("Ответ Metrapi слишком большой. Уменьшите размер выборки.")
+    return json.loads(data, parse_float=Decimal)
+
+
+def short_retry_delay(error):
+    if error.code != 429 or error.fp is None:
+        return None
+    try:
+        with error:
+            payload = json.loads(error.read(2048))
+    except (OSError, ValueError):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict) and detail.get("reason") == "too_soon":
+        seconds = detail.get("retry_after")
+        if type(seconds) in (int, float) and 0 <= seconds <= MAX_SHORT_RETRY_SECONDS:
+            return seconds + 0.1
+    return None
 
 
 def to_text(value, limit=250):

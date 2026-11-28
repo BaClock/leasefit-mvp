@@ -135,6 +135,49 @@ class MetrapiTests(TestCase):
         )
         self.assertFalse(Premises.objects.exists())
 
+    @patch("leasefit.metrapi.sleep")
+    @patch("leasefit.metrapi.build_opener")
+    def test_short_rate_limit_retries_the_lookup_once(self, opener, sleep):
+        def throttle():
+            return HTTPError(
+                "https://api.metrapi.ru/v1/items",
+                429,
+                "Too Many Requests",
+                {},
+                BytesIO(b'{"detail":{"reason":"too_soon","retry_after":2}}'),
+            )
+
+        call = opener.return_value.open
+        call.side_effect = [throttle(), BytesIO(json.dumps({"items": [LISTING]}).encode())]
+        self.assertContains(self.client.post("/app/parser", self.search), "Добавить в каталог")
+        self.assertEqual(call.call_count, 2)
+        self.assertIs(call.call_args_list[0].args[0], call.call_args_list[1].args[0])
+        sleep.assert_called_once_with(2.1)
+
+        call.reset_mock(side_effect=True)
+        sleep.reset_mock()
+        call.side_effect = [throttle(), throttle()]
+        response = self.client.post("/app/parser", self.search)
+        self.assertContains(response, "Достигнут лимит запросов Metrapi")
+        self.assertEqual(call.call_count, 2)
+        sleep.assert_called_once()
+
+    @patch("leasefit.metrapi.sleep")
+    @patch("leasefit.metrapi.build_opener")
+    def test_daily_quota_is_not_retried(self, opener, sleep):
+        call = opener.return_value.open
+        call.side_effect = HTTPError(
+            "https://api.metrapi.ru/v1/items",
+            429,
+            "Too Many Requests",
+            {},
+            BytesIO(b'{"detail":"daily limit exceeded"}'),
+        )
+        response = self.client.post("/app/parser", self.search)
+        self.assertContains(response, "Достигнут лимит запросов Metrapi")
+        call.assert_called_once()
+        sleep.assert_not_called()
+
     def test_price_mapping_does_not_guess_missing_unit_periods(self):
         self.assertIsNone(preview_item({**LISTING, "price_period": None})["rate"])
         self.assertIsNone(preview_item({**LISTING, "price_unit": "за м³"})["rate"])
